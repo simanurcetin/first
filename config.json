@@ -1,0 +1,54 @@
+{
+  "proje_adi": "Mimari 3D Mesh → Parametrik Grasshopper",
+  "versiyon": "1.0",
+
+  "siniflar": {
+    "aciklama": "Semantik sınıflar. İleride buraya yeni sınıf eklemek yeterli.",
+    "liste": [
+      {"id": 0, "ad": "wall",    "tr": "duvar",  "renk": [200, 200, 200]},
+      {"id": 1, "ad": "floor",   "tr": "döşeme", "renk": [180, 140, 100]},
+      {"id": 2, "ad": "ceiling", "tr": "tavan",  "renk": [240, 240, 240]},
+      {"id": 3, "ad": "door",    "tr": "kapı",   "renk": [120,  80,  40]},
+      {"id": 4, "ad": "window",  "tr": "pencere","renk": [ 80, 160, 220]},
+      {"id": 5, "ad": "roof",    "tr": "çatı",   "renk": [160,  60,  60]},
+      {"id": 6, "ad": "eave",    "tr": "saçak",  "renk": [140,  90,  50]}
+    ],
+    "toplam": 7
+  },
+
+  "veri_uretimi": {
+    "model_sayisi": 500,
+    "cikti_klasoru_obj":  "data/obj_files",
+    "cikti_klasoru_json": "data/json_files",
+    "tohum": 42,
+    "bina_parametreleri": {
+      "genislik_min": 6.0,
+      "genislik_max": 20.0,
+      "derinlik_min": 6.0,
+      "derinlik_max": 20.0,
+      "kat_yuksekligi": 3.0,
+      "kat_sayisi_min": 1,
+      "kat_sayisi_max": 5,
+      "pencere_oran_min": 0.15,
+      "pencere_oran_max": 0.45,
+      "kapi_genislik": 1.0,
+      "kapi_yukseklik": 2.1,
+      "sacak_uzunlugu": 0.5,
+      "cati_tipleri": ["flat", "pitched", "hip"]
+    }
+  },
+
+  "egitim": {
+    "nokta_sayisi": 2048,
+    "epoch": 100,
+    "batch_size": 16,
+    "ogrenme_hizi": 0.001,
+    "hedef_dogruluk": 0.89,
+    "model_kayit_yolu": "data/processed/model.pth"
+  },
+
+  "entegrasyon": {
+    "model_yolu": "data/processed/model.pth",
+    "gercek_zamanli_nokta_sayisi": 1024
+  }
+}

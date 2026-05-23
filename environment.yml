@@ -1,0 +1,19 @@
+name: mimari_ai
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9
+  - pip
+  # 3D nokta bulutu işleme
+  - pip:
+    - torch==2.0.1
+    - torchvision==0.15.2
+    - numpy==1.24.3
+    - open3d==0.17.0
+    - trimesh==3.23.5
+    - scikit-learn==1.3.0
+    - matplotlib==3.7.2
+    - tqdm==4.65.0
+    - pandas==2.0.3

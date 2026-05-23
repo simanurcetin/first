@@ -1,0 +1,77 @@
+============================================================
+  MİMARİ AI - UÇTAN UCA NOKTA BULUTU SEGMENTASYON SİSTEMİ
+============================================================
+
+PROJE AMACI:
+  Mimari 3D mesh modellerinden otomatik semantik segmentasyon.
+  Duvar, döşeme, pencere, kapı, çatı vb. elemanları AI ile tanıma.
+
+============================================================
+ADIM ADIM KULLANIM KILAVUZU
+============================================================
+
+ADIM 1 - KURULUM (Bir Kez Yapılır)
+  → kurulum/1_KURULUM.bat dosyasına çift tıklayın
+  → Tamamlanınca: kurulum/2_ORTAMI_TEST_ET.bat ile test edin
+
+ADIM 2 - FAZ 1: VERİ ÜRETİMİ (Grasshopper/Rhino)
+  → Rhino + Grasshopper açın
+  → Yeni bir "Python Script" bileşeni ekleyin
+  → faz1_veri_uretimi/grasshopper_generate.py içeriğini yapıştırın
+  → Çalıştırın → 500 .obj + 500 .json dosyası oluşur
+  → Çıktılar: data/obj_files/ ve data/json_files/
+
+ADIM 3 - FAZ 2: EĞİTİM (Google Colab)
+  → Google Colab'a gidin: colab.research.google.com
+  → faz2_egitim/ klasörüni Colab'a yükleyin
+  → Dosyaları sırayla çalıştırın (01_ → 02_ → 03_ → 04_ → 05_)
+  → Eğitim bittinde model.pth dosyasını indirin
+  → model.pth → data/processed/ klasörüne koyun
+
+ADIM 4 - FAZ 3: ENTEGRASYON (Grasshopper/Windows)
+  → faz3_entegrasyon/segment_v2.py Grasshopper'a bağlanır
+  → Slider ile gerçek zamanlı müdahale
+
+============================================================
+DOSYA YAPISI
+============================================================
+
+config.json           ← TÜM AYARLAR BURADA (önce buraya bakın)
+environment.yml       ← Conda ortam tanımı
+
+kurulum/
+  1_KURULUM.bat       ← Çift tıkla kur
+  2_ORTAMI_TEST_ET.bat← Kurulumu doğrula
+  test_ortam.py       ← Test kodu
+
+faz1_veri_uretimi/
+  grasshopper_generate.py  ← Grasshopper'a yapıştırılır
+
+faz2_egitim/
+  01_obj_to_pointcloud.py  ← OBJ → Nokta bulutu
+  02_dataset.py            ← PyTorch Dataset
+  03_pointnet2_model.py    ← PointNet++ model mimarisi
+  04_train.py              ← Eğitim döngüsü
+  05_evaluate.py           ← Değerlendirme + görselleştirme
+
+faz3_entegrasyon/
+  segment_v2.py            ← Grasshopper slider entegrasyonu
+
+data/
+  obj_files/               ← Faz 1 çıktısı: 500 .obj
+  json_files/              ← Faz 1 çıktısı: 500 .json
+  processed/               ← Faz 2 çıktısı: model.pth
+
+============================================================
+SEMANTİK SINIFLAR (config.json'dan)
+============================================================
+  0 = wall    (duvar)
+  1 = floor   (döşeme)
+  2 = ceiling (tavan)
+  3 = door    (kapı)
+  4 = window  (pencere)
+  5 = roof    (çatı)
+  6 = eave    (saçak)
+
+Yeni sınıf eklemek için config.json → "siniflar" listesine ekleyin.
+============================================================

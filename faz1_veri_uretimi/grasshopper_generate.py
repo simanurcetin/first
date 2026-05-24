@@ -71,8 +71,21 @@ def _proje_klasoru_bul():
     # Yöntem 2: Sabit yol tanımlanmışsa
     if _sabit_yol:
         return _sabit_yol
-    # Yöntem 3: Masaüstü\lorddoga (varsayılan)
-    return os.path.join(os.environ.get("USERPROFILE", "C:\\Users\\User"), "Desktop", "lorddoga")
+    # Yöntem 3: Olası masaüstü konumlarını sırayla dene
+    _userprofile = os.environ.get("USERPROFILE", "C:\\Users\\User")
+    _aday_yollar = [
+        os.path.join(_userprofile, "OneDrive", "Masaustu", "lorddoga"),
+        os.path.join(_userprofile, "OneDrive", "Masaüstü", "lorddoga"),
+        os.path.join(_userprofile, "OneDrive", "Desktop", "lorddoga"),
+        os.path.join(_userprofile, "Masaustu", "lorddoga"),
+        os.path.join(_userprofile, "Masaüstü", "lorddoga"),
+        os.path.join(_userprofile, "Desktop", "lorddoga"),
+    ]
+    for _y in _aday_yollar:
+        if os.path.isdir(_y):
+            return _y
+    # Hiçbiri yoksa OneDrive\Masaustu varsayılan (senin durumun)
+    return os.path.join(_userprofile, "OneDrive", "Masaustu", "lorddoga")
 
 _PROJE = _proje_klasoru_bul()
 OBJ_KLASORU  = os.path.join(_PROJE, "data", "obj_files")

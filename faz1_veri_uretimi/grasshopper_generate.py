@@ -49,11 +49,33 @@ import os                         # Klasör oluşturma, dosya yolu
 MODEL_SAYISI = 500
 
 # Dosyaların kaydedileceği klasörler
-# ÖNEMLİ: Grasshopper bu yolu Rhino dosyasının bulunduğu yere göre arar.
-# Eğer Rhino dosyanız C:\proje\ klasöründeyse, çıktılar oraya kaydedilir.
-# Ya da tam yol verebilirsiniz: "C:\\proje\\data\\obj_files"
-OBJ_KLASORU  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "obj_files")
-JSON_KLASORU = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "json_files")
+#
+# Grasshopper'da __file__ çalışmaz, bu yüzden yolu 3 yöntemle bulmaya çalışıyoruz:
+#   Yöntem 1: Rhino belgesi kaydedilmişse onun klasörünü kullan
+#   Yöntem 2: Masaüstündeki lorddoga klasörünü kullan
+#   Yöntem 3: Aşağıdaki SABIT_YOL satırını açıp kendi yolunuzu yazın
+#
+import Rhino as _Rhino
+
+_sabit_yol = ""   # ← Otomatik bulunamazsa buraya yazın: r"C:\Users\ADINIZ\Desktop\lorddoga"
+
+def _proje_klasoru_bul():
+    # Yöntem 1: Açık Rhino belgesi kaydedilmişse
+    try:
+        _doc_yol = _Rhino.RhinoDoc.ActiveDoc.Path
+        if _doc_yol:
+            return os.path.dirname(_doc_yol)
+    except:
+        pass
+    # Yöntem 2: Sabit yol tanımlanmışsa
+    if _sabit_yol:
+        return _sabit_yol
+    # Yöntem 3: Masaüstü\lorddoga (varsayılan)
+    return os.path.join(os.environ.get("USERPROFILE", "C:\\Users\\User"), "Desktop", "lorddoga")
+
+_PROJE = _proje_klasoru_bul()
+OBJ_KLASORU  = os.path.join(_PROJE, "data", "obj_files")
+JSON_KLASORU = os.path.join(_PROJE, "data", "json_files")
 
 # Rastgelelik için tohum - aynı tohum = aynı modeller (tekrarlanabilirlik)
 TOHUM = 42

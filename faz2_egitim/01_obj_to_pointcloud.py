@@ -141,9 +141,9 @@ def meshten_nokta_ornekle(köseler, yuzeyler, etiketler, n_nokta):
         # Hiç geçerli üçgen yoksa sıfır nokta bulutu döndür
         return np.zeros((n_nokta, 4), dtype=np.float32)
 
-    # Alan ağırlıklı olasılık dağılımı
-    toplam_alan = sum(ucgen_alanlari)
-    olasiliklar = [a / toplam_alan for a in ucgen_alanlari]
+    # Alan ağırlıklı olasılık dağılımı (numpy ile normalize et - float hassasiyet hatasını önler)
+    olasiliklar = np.array(ucgen_alanlari, dtype=np.float64)
+    olasiliklar /= olasiliklar.sum()
 
     # n_nokta kadar üçgen seç (tekrar olabilir)
     secili_indeksler = np.random.choice(
@@ -257,9 +257,16 @@ def donustur():
     print(f"\n  Tamamlandı: {basarili} başarılı, {hatali} hatalı")
     print(f"  Çıktı klasörü: {CIKTI_KLASORU}")
 
-    # Özet istatistik
+    # Özet istatistik (ilk başarılı dosyayı bul)
     if basarili > 0:
-        ornek = np.load(os.path.join(CIKTI_KLASORU, obj_dosyalari[0].replace(".obj", ".npy")))
+        ilk_npy = next(
+            (os.path.join(CIKTI_KLASORU, f.replace(".obj", ".npy"))
+             for f in obj_dosyalari
+             if os.path.exists(os.path.join(CIKTI_KLASORU, f.replace(".obj", ".npy")))),
+            None
+        )
+        ornek = np.load(ilk_npy) if ilk_npy else None
+    if basarili > 0 and ornek is not None:
         print(f"\n  Örnek dosya boyutu: {ornek.shape}  (nokta_sayisi x 4)")
         print(f"  Sütunlar: [x, y, z, sinif_etiketi]")
         siniflar, sayilar = np.unique(ornek[:, 3].astype(int), return_counts=True)

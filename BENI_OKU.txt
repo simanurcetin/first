@@ -23,10 +23,16 @@ ADIM 2 - FAZ 1: VERİ ÜRETİMİ (Grasshopper/Rhino)
 
 ADIM 3 - FAZ 2: EĞİTİM (Google Colab)
   → Google Colab'a gidin: colab.research.google.com
-  → faz2_egitim/ klasörüni Colab'a yükleyin
-  → Dosyaları sırayla çalıştırın (01_ → 02_ → 03_ → 04_ → 05_)
-  → Eğitim bittinde model.pth dosyasını indirin
-  → model.pth → data/processed/ klasörüne koyun
+  → Repoyu Colab'a klonlayın:
+      !git clone https://github.com/simanurcetin/first.git
+      %cd first
+  → data/ klasörünü (obj_files/ + json_files/) Drive'dan kopyalayın
+  → Adım adım çalıştırın:
+      1) faz2_egitim/01_obj_to_pointcloud.py  → Nokta bulutu üretir
+      2) faz2_egitim/04_train.py              → Modeli eğitir
+      3) faz2_egitim/05_evaluate.py           → Sonuçları değerlendirir
+  → Eğitim bittinde model_best.pth dosyasını indirin
+  → model_best.pth → data/processed/ klasörüne koyun
 
 ADIM 4 - FAZ 3: ENTEGRASYON (Grasshopper/Windows)
   → faz3_entegrasyon/segment_v2.py Grasshopper'a bağlanır
@@ -48,11 +54,12 @@ faz1_veri_uretimi/
   grasshopper_generate.py  ← Grasshopper'a yapıştırılır
 
 faz2_egitim/
-  01_obj_to_pointcloud.py  ← OBJ → Nokta bulutu
-  02_dataset.py            ← PyTorch Dataset
-  03_pointnet2_model.py    ← PointNet++ model mimarisi
-  04_train.py              ← Eğitim döngüsü
-  05_evaluate.py           ← Değerlendirme + görselleştirme
+  01_obj_to_pointcloud.py  ← OBJ → Nokta bulutu (doğrudan çalıştırılır)
+  o2_dataset.py            ← PyTorch Dataset (04_train tarafından import edilir)
+  o3_pointnet2_model.py    ← PointNet++ model mimarisi (04_train tarafından import edilir)
+  04_train.py              ← Eğitim döngüsü (doğrudan çalıştırılır)
+  05_evaluate.py           ← Değerlendirme + görselleştirme (doğrudan çalıştırılır)
+  __init__.py              ← Python paketi tanımı (değiştirmeyin)
 
 faz3_entegrasyon/
   segment_v2.py            ← Grasshopper slider entegrasyonu

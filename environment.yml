@@ -1,7 +1,15 @@
 name: mimari_ai
 channels:
+  - pytorch
   - conda-forge
   - defaults
 dependencies:
   - python=3.9
   - pip
+  - pip:
+    - torch>=2.0.0
+    - torchvision
+    - numpy
+    - tqdm
+    - matplotlib
+    - scipy

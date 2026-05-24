@@ -1,5 +1,6 @@
+# -*- coding: utf-8 -*-
 # =============================================================================
-# FAZ 1 - SENTETİK BİNA MODELİ ÜRETİCİ
+# FAZ 1 - SENTETIK BINA MODELI URETICISI
 # =============================================================================
 #
 # BU DOSYA GRASSHOPPER'IN "PYTHON SCRIPT" BİLEŞENİNE YAPIŞTIRILIR.
@@ -152,7 +153,7 @@ def obj_olarak_kaydet(mesh, dosya_yolu):
         v 0.0 0.0 3.0    ← köşe 4
         f 1 2 3 4        ← bu 4 köşe bir yüzey oluşturur
     """
-    satirlar = ["# Mimari AI - Otomatik Üretilmiş Bina Modeli\n"]
+    satirlar = ["# Mimari AI - Sentetik Bina Modeli\n"]
 
     # Tüm köşeleri yaz
     for i in range(mesh.Vertices.Count):
@@ -187,8 +188,8 @@ def json_olarak_kaydet(veri, dosya_yolu):
     Bu JSON dosyası Faz 2'de hangi yüzeyin hangi sınıfa ait olduğunu gösterir.
     PointNet eğitimi bu etiketleri kullanır.
     """
-    with open(dosya_yolu, "w", encoding="utf-8") as f:
-        json.dump(veri, f, indent=2, ensure_ascii=False)
+    with open(dosya_yolu, "w") as f:
+        json.dump(veri, f, indent=2, ensure_ascii=True)
 
 # =============================================================================
 # BİNA ÜRETME MOTORU
@@ -245,7 +246,7 @@ class BinaUretici:
 
         # Çatı tipi
         cati_tipi   = self.secim(["flat", "pitched", "hip"])
-        cati_eğimi  = self.rastgele(20.0, 45.0)    # Derece cinsinden
+        cati_egimi  = self.rastgele(20.0, 45.0)    # Derece cinsinden
         sacak_uzu   = 0.5                           # Saçak çıkıntısı (metre)
 
         # Pencere parametreleri
@@ -290,14 +291,14 @@ class BinaUretici:
                 tum_x0, tum_y0, tum_x1, tum_y1, toplam_h, sacak_uzu
             )
         elif cati_tipi == "pitched":
-            self._beşik_cati_ekle(
+            self._besik_cati_ekle(
                 birlesik_mesh, etiketler,
-                tum_x0, tum_y0, tum_x1, tum_y1, toplam_h, cati_eğimi, sacak_uzu
+                tum_x0, tum_y0, tum_x1, tum_y1, toplam_h, cati_egimi, sacak_uzu
             )
         else:  # hip
-            self._kırma_cati_ekle(
+            self._kirma_cati_ekle(
                 birlesik_mesh, etiketler,
-                tum_x0, tum_y0, tum_x1, tum_y1, toplam_h, cati_eğimi, sacak_uzu
+                tum_x0, tum_y0, tum_x1, tum_y1, toplam_h, cati_egimi, sacak_uzu
             )
 
         # Normalleri hesapla (ışık ve görüntüleme için gerekli)
@@ -315,7 +316,7 @@ class BinaUretici:
             "kat_yuksekligi": kat_h,
             "toplam_yukseklik": round(toplam_h, 3),
             "pencere_orani": round(pencere_oran, 3),
-            "cati_egimi_derece": round(cati_eğimi, 1),
+            "cati_egimi_derece": round(cati_egimi, 1),
             "sacak_uzunlugu": sacak_uzu,
             "yuzey_sayisi":  birlesik_mesh.Faces.Count,
             "etiket_listesi": etiketler,

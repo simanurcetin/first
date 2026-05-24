@@ -315,47 +315,48 @@ class PointNet2Segmentasyon(nn.Module):
         self.n_sinif = n_sinif
 
         # --- ENCODER ---
-        # (npoint, k, in_ch, mlp)
-        self.sa1 = SetAbstraction(npoint=512, k=32, in_ch=3,   mlp=[32, 32, 64])
-        self.sa2 = SetAbstraction(npoint=128, k=32, in_ch=3+64, mlp=[64, 64, 128])
-        self.sa3 = SetAbstraction(npoint=32,  k=16, in_ch=3+128,mlp=[128, 128, 256])
+        # Giriş: xyz(3) + normal(3) = 6 boyutlu özellik
+        # in_ch = rel_xyz(3) + özellik boyutu
+        self.sa1 = SetAbstraction(npoint=512, k=32, in_ch=3+3,   mlp=[64, 64, 128])
+        self.sa2 = SetAbstraction(npoint=128, k=32, in_ch=3+128,  mlp=[128, 128, 256])
+        self.sa3 = SetAbstraction(npoint=32,  k=16, in_ch=3+256,  mlp=[256, 256, 512])
 
         # --- DECODER ---
-        # (in_ch = üst katman özelliği + skip connection özelliği)
-        self.fp3 = FeaturePropagation(in_ch=256+128, mlp=[256, 128])
-        self.fp2 = FeaturePropagation(in_ch=128+64,  mlp=[128, 64])
-        self.fp1 = FeaturePropagation(in_ch=64+0,    mlp=[64, 64])
+        self.fp3 = FeaturePropagation(in_ch=512+256, mlp=[256, 256])
+        self.fp2 = FeaturePropagation(in_ch=256+128, mlp=[256, 128])
+        self.fp1 = FeaturePropagation(in_ch=128+0,   mlp=[128, 128])
 
         # --- SINIFLANDIRICI ---
         self.siniflandirici = nn.Sequential(
-            nn.Conv1d(64, 64, 1),
-            nn.BatchNorm1d(64),
+            nn.Conv1d(128, 128, 1),
+            nn.BatchNorm1d(128),
             nn.ReLU(),
             nn.Dropout(0.4),
-            nn.Conv1d(64, n_sinif, 1)
+            nn.Conv1d(128, n_sinif, 1)
         )
 
-    def forward(self, xyz):
+    def forward(self, xyz_normal):
         """
-        xyz: [B, N, 3]
-        Döndürür: [B, N, n_sinif] → her noktanın sınıf skorları (softmax öncesi)
+        xyz_normal: [B, N, 6] → xyz(3) + normal vektör(3)
+        Döndürür:   [B, N, n_sinif]
         """
-        B, N, _ = xyz.shape
+        xyz    = xyz_normal[:, :, 0:3]   # [B, N, 3] — geometri
+        normal = xyz_normal[:, :, 3:6]   # [B, N, 3] — normal özellik
 
         # === ENCODER ===
-        xyz1, feat1 = self.sa1(xyz)           # [B,512,3], [B,512,64]
-        xyz2, feat2 = self.sa2(xyz1, feat1)   # [B,128,3], [B,128,128]
-        xyz3, feat3 = self.sa3(xyz2, feat2)   # [B,32,3],  [B,32,256]
+        xyz1, feat1 = self.sa1(xyz, normal)    # [B,512,3], [B,512,128]
+        xyz2, feat2 = self.sa2(xyz1, feat1)    # [B,128,3], [B,128,256]
+        xyz3, feat3 = self.sa3(xyz2, feat2)    # [B,32,3],  [B,32,512]
 
         # === DECODER ===
-        feat2_up = self.fp3(xyz2, xyz3, feat2, feat3)   # [B,128,128]
-        feat1_up = self.fp2(xyz1, xyz2, feat1, feat2_up) # [B,512,64]
-        feat0_up = self.fp1(xyz,  xyz1, None,  feat1_up) # [B,N,64]
+        feat2_up = self.fp3(xyz2, xyz3, feat2, feat3)    # [B,128,256]
+        feat1_up = self.fp2(xyz1, xyz2, feat1, feat2_up) # [B,512,128]
+        feat0_up = self.fp1(xyz,  xyz1, None,  feat1_up) # [B,N,128]
 
         # === SINIFLANDIRICI ===
-        cikis = feat0_up.permute(0, 2, 1)               # [B, 64, N]
-        cikis = self.siniflandirici(cikis)               # [B, n_sinif, N]
-        cikis = cikis.permute(0, 2, 1)                   # [B, N, n_sinif]
+        cikis = feat0_up.permute(0, 2, 1)                # [B, 128, N]
+        cikis = self.siniflandirici(cikis)                # [B, n_sinif, N]
+        cikis = cikis.permute(0, 2, 1)                    # [B, N, n_sinif]
 
         return cikis
 

@@ -16,9 +16,10 @@
 #   Bu noktalar "3D uzaydaki koordinatlar + sınıf etiketi" içerir.
 #
 # ÇIKTI DOSYASI YAPISI (her .npy dosyası):
-#   [N, 4] boyutlu dizi:
+#   [N, 7] boyutlu dizi:
 #   - [:, 0:3] → x, y, z koordinatları
-#   - [:, 3]   → sınıf etiketi (0-6 arası tam sayı)
+#   - [:, 3:6] → yüzey normal vektörü (nx, ny, nz)
+#   - [:, 6]   → sınıf etiketi (0-6 arası tam sayı)
 #
 # COLAB'A YÜKLEME:
 #   1. Bu dosyayı ve data/obj_files + data/json_files klasörlerini Drive'a yükle
@@ -77,15 +78,22 @@ def obj_oku(dosya_yolu):
     return np.array(köseler, dtype=np.float32), yuzeyler
 
 
-def ucgen_alan(p0, p1, p2):
+def ucgen_alan_ve_normal(p0, p1, p2):
     """
-    Üç nokta ile tanımlanan üçgenin alanını hesaplar.
-    Vektörel çarpım yöntemi kullanılır.
+    Üçgenin alanını ve normalize edilmiş yüzey normalini hesaplar.
+    Normal vektör: duvar=yatay, zemin=yukarı, tavan=aşağı
+    → model sınıfları çok daha kolay ayırt eder.
     """
     v1 = p1 - p0
     v2 = p2 - p0
     capraz = np.cross(v1, v2)
-    return 0.5 * np.linalg.norm(capraz)
+    uzunluk = np.linalg.norm(capraz)
+    alan = 0.5 * uzunluk
+    if uzunluk > 0:
+        normal = (capraz / uzunluk).astype(np.float32)
+    else:
+        normal = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+    return alan, normal
 
 
 def meshten_nokta_ornekle(köseler, yuzeyler, etiketler, n_nokta):
@@ -104,8 +112,9 @@ def meshten_nokta_ornekle(köseler, yuzeyler, etiketler, n_nokta):
     5. O noktaya yüzeyin etiketini ata
     """
 
-    # Her yüzeyi üçgenlere böl ve alanını hesapla
+    # Her yüzeyi üçgenlere böl, alan ve normalini hesapla
     ucgen_alanlari = []
+    ucgen_normalleri = []
     ucgen_etiketleri = []
     ucgen_kose_listeleri = []
 
@@ -132,16 +141,17 @@ def meshten_nokta_ornekle(köseler, yuzeyler, etiketler, n_nokta):
             p0 = köseler[ucgen[0]]
             p1 = köseler[ucgen[1]]
             p2 = köseler[ucgen[2]]
-            alan = ucgen_alan(p0, p1, p2)
+            alan, normal = ucgen_alan_ve_normal(p0, p1, p2)
             ucgen_alanlari.append(alan)
+            ucgen_normalleri.append(normal)
             ucgen_etiketleri.append(etiket)
             ucgen_kose_listeleri.append((p0, p1, p2))
 
     if not ucgen_alanlari:
         # Hiç geçerli üçgen yoksa sıfır nokta bulutu döndür
-        return np.zeros((n_nokta, 4), dtype=np.float32)
+        return np.zeros((n_nokta, 7), dtype=np.float32)
 
-    # Alan ağırlıklı olasılık dağılımı (numpy ile normalize et - float hassasiyet hatasını önler)
+    # Alan ağırlıklı olasılık dağılımı
     olasiliklar = np.array(ucgen_alanlari, dtype=np.float64)
     olasiliklar /= olasiliklar.sum()
 
@@ -153,15 +163,15 @@ def meshten_nokta_ornekle(köseler, yuzeyler, etiketler, n_nokta):
         p=olasiliklar
     )
 
-    # Seçilen üçgenlerin içine rastgele nokta üret
-    # (Barycentric koordinat yöntemi)
-    noktalar = np.zeros((n_nokta, 4), dtype=np.float32)
+    # Seçilen üçgenlerin içine rastgele nokta üret (Barycentric yöntem)
+    # Çıktı: [N, 7] → [x, y, z, nx, ny, nz, etiket]
+    noktalar = np.zeros((n_nokta, 7), dtype=np.float32)
 
     for i, idx in enumerate(secili_indeksler):
         p0, p1, p2 = ucgen_kose_listeleri[idx]
         etiket = ucgen_etiketleri[idx]
+        normal = ucgen_normalleri[idx]
 
-        # Üçgen içi rastgele nokta: barycentric yöntem
         r1 = np.random.random()
         r2 = np.random.random()
         if r1 + r2 > 1.0:
@@ -173,35 +183,27 @@ def meshten_nokta_ornekle(köseler, yuzeyler, etiketler, n_nokta):
         y = r1 * p0[1] + r2 * p1[1] + r3 * p2[1]
         z = r1 * p0[2] + r2 * p1[2] + r3 * p2[2]
 
-        noktalar[i] = [x, y, z, etiket]
+        noktalar[i] = [x, y, z, normal[0], normal[1], normal[2], etiket]
 
     return noktalar
 
 
-def normalize_et(noktalar_xyzl):
+def normalize_et(noktalar_xyznnl):
     """
     Nokta bulutunu birim küreye normalize eder.
-
-    NEDEN GEREKLİ?
-    Farklı binalar farklı boyutlarda (6m-20m arası).
-    PointNet++ ağı her zaman aynı ölçekte nokta bulutu beklediği için
-    hepsini aynı [-1, +1] aralığına sıkıştırıyoruz.
-
-    Sadece xyz koordinatları normalize edilir, etiket (4. sütun) değişmez.
+    Sadece xyz (0:3) normalize edilir; normal vektörler (3:6) ve etiket (6) değişmez.
     """
-    xyz = noktalar_xyzl[:, 0:3].copy()
+    xyz = noktalar_xyznnl[:, 0:3].copy()
 
-    # Merkezi orijine taşı
     merkez = xyz.mean(axis=0)
     xyz -= merkez
 
-    # En uzak noktayı bul ve birim küreye sığdır
     en_uzak = np.max(np.sqrt(np.sum(xyz ** 2, axis=1)))
     if en_uzak > 0:
         xyz /= en_uzak
 
-    noktalar_xyzl[:, 0:3] = xyz
-    return noktalar_xyzl
+    noktalar_xyznnl[:, 0:3] = xyz
+    return noktalar_xyznnl
 
 
 # =============================================================================
@@ -267,9 +269,9 @@ def donustur():
         )
         ornek = np.load(ilk_npy) if ilk_npy else None
     if basarili > 0 and ornek is not None:
-        print(f"\n  Örnek dosya boyutu: {ornek.shape}  (nokta_sayisi x 4)")
-        print(f"  Sütunlar: [x, y, z, sinif_etiketi]")
-        siniflar, sayilar = np.unique(ornek[:, 3].astype(int), return_counts=True)
+        print(f"\n  Örnek dosya boyutu: {ornek.shape}  (nokta_sayisi x 7)")
+        print(f"  Sütunlar: [x, y, z, nx, ny, nz, sinif_etiketi]")
+        siniflar, sayilar = np.unique(ornek[:, 6].astype(int), return_counts=True)
         print(f"  İlk modelde sınıf dağılımı:")
         sinif_adlari = {0:"wall", 1:"floor", 2:"ceiling", 3:"door", 4:"window", 5:"roof", 6:"eave"}
         for s, n in zip(siniflar, sayilar):

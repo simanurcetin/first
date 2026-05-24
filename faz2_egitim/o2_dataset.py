@@ -82,56 +82,55 @@ class MimariDataset(Dataset):
         idx numaralı modeli yükler ve döndürür.
         PyTorch DataLoader bu fonksiyonu otomatik çağırır.
         """
-        veri = np.load(self.dosyalar[idx])   # [2048, 4] → [x, y, z, etiket]
+        veri = np.load(self.dosyalar[idx])   # [2048, 7] → [x, y, z, nx, ny, nz, etiket]
 
-        xyz      = veri[:, 0:3].copy()       # Koordinatlar
-        etiketler = veri[:, 3].copy()         # Sınıf etiketleri
+        xyz     = veri[:, 0:3].copy()        # Koordinatlar
+        normaller = veri[:, 3:6].copy()      # Normal vektörler
+        etiketler = veri[:, 6].copy()        # Sınıf etiketleri
 
-        # Eğitim sırasında veri artırma uygula
+        # Eğitim sırasında veri artırma uygula (xyz + normaller birlikte döndürülür)
         if self.egitim:
-            xyz = self._veri_artir(xyz)
+            xyz, normaller = self._veri_artir(xyz, normaller)
+
+        # xyz ve normalleri birleştir → [2048, 6]
+        xyz_normal = np.concatenate([xyz, normaller], axis=1).astype(np.float32)
 
         # Numpy → PyTorch tensör
-        xyz       = torch.from_numpy(xyz.astype(np.float32))        # [2048, 3]
-        etiketler = torch.from_numpy(etiketler.astype(np.int64))    # [2048]
+        xyz_normal = torch.from_numpy(xyz_normal)               # [2048, 6]
+        etiketler  = torch.from_numpy(etiketler.astype(np.int64))  # [2048]
 
-        return xyz, etiketler
+        return xyz_normal, etiketler
 
-    def _veri_artir(self, xyz):
+    def _veri_artir(self, xyz, normaller):
         """
         Eğitim sırasında nokta bulutunu rastgele dönüştürür.
-
-        1. Z ekseni etrafında döndür → bina farklı yönlerden görülür
-        2. Ölçeği hafifçe değiştir → farklı bina boyutları simüle edilir
-        3. Küçük gürültü ekle → sensör hatası, mesh hassasiyeti simüle edilir
+        Normal vektörler de aynı rotasyona tabi tutulur (öteleme/ölçek uygulanmaz).
         """
-
-        # 1. Z ekseni etrafında rastgele 90° katları döndür
-        aci = np.random.choice([0, 90, 180, 270])
-        aci_rad = np.radians(aci)
+        # Z ekseni etrafında rastgele döndür (0-360° sürekli)
+        aci_rad = np.random.uniform(0, 2 * np.pi)
         donme_matrisi = np.array([
             [np.cos(aci_rad), -np.sin(aci_rad), 0],
             [np.sin(aci_rad),  np.cos(aci_rad), 0],
             [0,                0,               1]
         ], dtype=np.float32)
-        xyz = xyz @ donme_matrisi.T
+        xyz      = xyz @ donme_matrisi.T
+        normaller = normaller @ donme_matrisi.T  # Normaller de döndürülür
 
-        # 2. Rastgele ölçek (±10%)
+        # Rastgele ölçek (±10%) — sadece xyz'ye uygulanır
         olcek = np.random.uniform(0.9, 1.1)
         xyz *= olcek
 
-        # 3. Küçük Gaussian gürültü
-        gurultu = np.random.normal(0, 0.005, xyz.shape).astype(np.float32)
-        xyz += gurultu
+        # Küçük Gaussian gürültü (xyz'ye)
+        xyz += np.random.normal(0, 0.005, xyz.shape).astype(np.float32)
 
-        # Normalize et (ölçek değiştiğinden tekrar birim küre)
+        # xyz normalize et
         merkez = xyz.mean(axis=0)
         xyz -= merkez
         en_uzak = np.max(np.sqrt(np.sum(xyz ** 2, axis=1)))
         if en_uzak > 0:
             xyz /= en_uzak
 
-        return xyz
+        return xyz, normaller
 
 
 def loader_olustur(klasor, batch_size=16, test_orani=0.15):

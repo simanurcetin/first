@@ -171,9 +171,10 @@ def egit():
     # Kayıp fonksiyonu: CrossEntropy (sınıf dengesizliği için ağırlıklı)
     # Kapı ve pencere daha az nokta içerir → daha yüksek ağırlık
     sinif_agirliklari = torch.tensor(
-        [1.0, 1.0, 1.0, 3.0, 2.5, 1.0, 1.5],  # wall,floor,ceiling,door,window,roof,eave
+        [1.0, 2.0, 3.0, 20.0, 12.0, 1.0, 4.0],  # wall,floor,ceiling,door,window,roof,eave
         dtype=torch.float32
     ).to(cihaz)
+    # door(~0.2% nokta) ve window(~4%) çok az temsil ediliyor → yüksek ağırlık şart
     kayip_fonk = nn.CrossEntropyLoss(weight=sinif_agirliklari)
 
     # Optimizer

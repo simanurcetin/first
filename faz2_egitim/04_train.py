@@ -193,11 +193,14 @@ def egit():
 
     # Kayıp fonksiyonu: CrossEntropy (sınıf dengesizliği için ağırlıklı)
     # Kapı ve pencere daha az nokta içerir → daha yüksek ağırlık
+    # Floor ve ceiling eşit ağırlık → seesaw sorunu giderildi
+    # Focal Loss yerine plain CrossEntropy: ikisi de yatay yüzey olduğundan
+    # Focal Loss biri öğrenince diğerini tamamen bırakıyordu
     sinif_agirliklari = torch.tensor(
-        [1.0, 3.0, 2.0, 4.0, 3.5, 1.0, 2.0],   # wall,floor,ceiling,door,window,roof,eave
+        [1.0, 3.0, 3.0, 5.0, 4.0, 1.0, 2.0],   # wall,floor,ceiling,door,window,roof,eave
         dtype=torch.float32
     ).to(cihaz)
-    kayip_fonk = FocalLoss(alpha=sinif_agirliklari, gamma=1.0)
+    kayip_fonk = nn.CrossEntropyLoss(weight=sinif_agirliklari)
 
     # Optimizer
     optimizer = optim.Adam(model.parameters(), lr=AYARLAR["ogrenme_hizi"])

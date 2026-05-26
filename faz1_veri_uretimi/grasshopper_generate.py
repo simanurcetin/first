@@ -433,22 +433,22 @@ class BinaUretici:
 
                 # Sadece ilk duvar döngüsünde döşeme/tavan ekle (tekrar etmesin)
                 if yon == "gney":
-                    # Döşeme (zeminden 0 yükseklikte, kat=0 için)
-                    # ya da ara kat döşemesi
-                    zer = z_alt
+                    # Döşeme: köşe sırası CCW (yukarıdan bakınca) → normal YUKARI
                     mesh_e_quad_ekle(mesh,
-                        p3d(x0, y0, zer), p3d(x1, y0, zer),
-                        p3d(x1, y1, zer), p3d(x0, y1, zer)
+                        p3d(x0, y0, z_alt), p3d(x1, y0, z_alt),
+                        p3d(x1, y1, z_alt), p3d(x0, y1, z_alt)
                     )
                     etiketler.append(SINIF["floor"])
 
-                    # Tavan (son katta çatı olduğu için tavan yok, o yüzey "ceiling")
-                    if kat < kat_sayisi - 1:
-                        mesh_e_quad_ekle(mesh,
-                            p3d(x0, y0, z_ust), p3d(x1, y0, z_ust),
-                            p3d(x1, y1, z_ust), p3d(x0, y1, z_ust)
-                        )
-                        etiketler.append(SINIF["ceiling"])
+                    # Tavan: TÜM KATLARDA ekle (tek katlı dahil)
+                    # Köşe sırası TERS (CW yukarıdan) → normal AŞAĞI (odanın içine)
+                    # 2cm içeride: üst kattaki döşemeden geometrik olarak ayrışır
+                    z_tavan_yuz = z_ust - 0.02
+                    mesh_e_quad_ekle(mesh,
+                        p3d(x0, y1, z_tavan_yuz), p3d(x1, y1, z_tavan_yuz),
+                        p3d(x1, y0, z_tavan_yuz), p3d(x0, y0, z_tavan_yuz)
+                    )
+                    etiketler.append(SINIF["ceiling"])
 
             # --- KAT KAT DUVARLARI ÇIZDIR ---
             for kat in range(kat_sayisi):
@@ -1004,9 +1004,92 @@ def ana_uretim():
     return basarili
 
 
-# Grasshopper'da script bu satırla çalışır
+# =============================================================================
+# GRASSHOPPER ÇIKTI BLOĞU
+# =============================================================================
+#
+# GH Python Script bileşenine şu parametreleri ekleyin:
+#
+#   GİRİŞ (sağ tık → "Add Input"):
+#     model_no    → Integer (Number Slider, 0-499 arası)
+#     kaydet_tumu → Boolean (Toggle, True = 500 model üret ve kaydet)
+#
+#   ÇIKIŞ (sağ tık → "Add Output"):
+#     cikti_mesh  → Mesh Preview bileşenine bağlayın
+#     rapor       → Panel bileşenine bağlayın
+#
+# Renk kodları:
+#   Gri   = duvar    Kahve = döşeme   Açık mavi = tavan
+#   Koyu kahve = kapı  Mavi = pencere  Kırmızı = çatı  Turuncu = saçak
+# =============================================================================
+
+SINIF_RENKLERI = {
+    0: (180, 180, 180),   # wall    → gri
+    1: (160, 120,  80),   # floor   → kahve
+    2: (180, 220, 255),   # ceiling → açık mavi  (floor'dan ayırt etmek için)
+    3: ( 80,  50,  20),   # door    → koyu kahve
+    4: ( 60, 140, 220),   # window  → mavi
+    5: (200,  60,  60),   # roof    → kırmızı
+    6: (200, 130,  50),   # eave    → turuncu
+}
+
+def mesh_renklendir(mesh, etiketler):
+    """Her yüzeyi sınıf rengine göre boyar (Grasshopper önizleme için)."""
+    try:
+        import System.Drawing as sd
+        mesh.VertexColors.CreateMonotoneMesh(sd.Color.White)
+        for yuz_i in range(mesh.Faces.Count):
+            if yuz_i >= len(etiketler):
+                break
+            r, g, b = SINIF_RENKLERI.get(etiketler[yuz_i], (200, 200, 200))
+            renk = sd.Color.FromArgb(255, r, g, b)
+            f = mesh.Faces[yuz_i]
+            mesh.VertexColors[f.A] = renk
+            mesh.VertexColors[f.B] = renk
+            mesh.VertexColors[f.C] = renk
+            if not f.IsTriangle:
+                mesh.VertexColors[f.D] = renk
+    except:
+        pass  # System.Drawing yoksa (Colab/Python) renksiz devam et
+    return mesh
+
+# --- Grasshopper çıkışları ---
+cikti_mesh = None
+rapor      = ""
+
+try:
+    _id = int(model_no) if "model_no" in dir() else 0
+    _uretici = BinaUretici(_id)
+    _mesh, _etiketler, _bilgi = _uretici.bina_uret(_id)
+    cikti_mesh = mesh_renklendir(_mesh, _etiketler)
+
+    from collections import Counter as _C
+    _sayac = _C(_etiketler)
+    _sinif_adlari = {0:"Duvar", 1:"Doseme", 2:"Tavan", 3:"Kapi", 4:"Pencere", 5:"Cati", 6:"Sacak"}
+    _satirlar = [
+        "Model {}: {}x{} m, {} kat, {} cati".format(
+            _id,
+            round(_bilgi["genislik"], 1), round(_bilgi["derinlik"], 1),
+            _bilgi["kat_sayisi"], _bilgi["cati_tipi"]
+        ),
+        "Toplam yuzey: {}".format(_bilgi["yuzey_sayisi"]),
+        "",
+    ]
+    for _s in range(7):
+        _satirlar.append("  {}: {} yuzey".format(_sinif_adlari[_s], _sayac.get(_s, 0)))
+    rapor = "\n".join(_satirlar)
+
+except Exception as _e:
+    rapor = "Hata: " + str(_e)
+
+# 500 model kaydetme (kaydet_tumu = True yapınca çalışır)
+if "kaydet_tumu" in dir() and kaydet_tumu:
+    try:
+        _basarili = ana_uretim()
+        rapor = rapor + "\n\n500 model kaydedildi! ({} basarili)".format(_basarili)
+    except Exception as _e:
+        rapor = rapor + "\n\nKaydetme hatasi: " + str(_e)
+
+# Standart Python'dan çalıştırılırsa (Grasshopper dışı)
 if __name__ == "__main__":
-    ana_uretim()
-else:
-    # Grasshopper Python bileşeni için doğrudan çalıştır
     ana_uretim()

@@ -67,11 +67,9 @@ AYARLAR = {
     "nokta_klasoru":  "data/processed/pointclouds",
     "model_kayit":    "data/processed",
     "n_sinif":        7,
-    "epoch":          100,
+    "epoch":          150,
     "batch_size":     16,
     "ogrenme_hizi":   0.001,
-    "lr_adim":        20,        # Her 20 epoch'ta öğrenme hızını azalt
-    "lr_gama":        0.5,       # Azaltma oranı (0.5 = yarıya düşür)
     "test_orani":     0.15,
 }
 
@@ -196,22 +194,20 @@ def egit():
     # Kayıp fonksiyonu: CrossEntropy (sınıf dengesizliği için ağırlıklı)
     # Kapı ve pencere daha az nokta içerir → daha yüksek ağırlık
     sinif_agirliklari = torch.tensor(
-        [1.0, 2.0, 2.0, 6.0, 5.0, 1.0, 2.0],   # wall,floor,ceiling,door,window,roof,eave
+        [1.0, 2.0, 4.0, 6.0, 5.0, 1.0, 2.0],   # wall,floor,ceiling,door,window,roof,eave
         dtype=torch.float32
     ).to(cihaz)
-    # Focal Loss ile birlikte moderate ağırlıklar yeterli —
-    # γ=2 zaten zor sınıflara (door/window) otomatik odaklanır
     kayip_fonk = FocalLoss(alpha=sinif_agirliklari, gamma=2.0)
 
     # Optimizer
     optimizer = optim.Adam(model.parameters(), lr=AYARLAR["ogrenme_hizi"])
 
-    # Öğrenme hızı azaltma planı
-    # Her lr_adim epoch'ta lr'yi lr_gama ile çarp
-    scheduler = optim.lr_scheduler.StepLR(
+    # CosineAnnealingLR: LR 0.001'den yumuşakça 0'a iner
+    # StepLR'den daha iyi: ani düşüş yerine sinüs eğrisi ile azalır
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
-        step_size=AYARLAR["lr_adim"],
-        gamma=AYARLAR["lr_gama"]
+        T_max=AYARLAR["epoch"],
+        eta_min=1e-5
     )
 
     # Eğitim kaydı

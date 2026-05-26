@@ -25,6 +25,7 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 import os
@@ -33,6 +34,30 @@ import time
 # Kendi dosyalarımızı import et
 from faz2_egitim.o2_dataset import loader_olustur
 from faz2_egitim.o3_pointnet2_model import PointNet2Segmentasyon
+
+
+class FocalLoss(nn.Module):
+    """
+    Focal Loss — sınıf dengesizliği için CrossEntropy'den üstün.
+
+    Fikir: Model zaten iyi öğrendiği sınıfları (wall, roof) kolayca doğru tahmin eder.
+    Focal Loss bu kolay örneklerin katkısını küçülterek modeli zor örneklere
+    (door, window) odaklar. Manuel ağırlık ayarına gerek kalmaz.
+
+    FL(p) = -α * (1-p)^γ * log(p)
+    γ=2: kolay örnekler 4x daha az ağırlıklı
+    """
+    def __init__(self, alpha, gamma=2.0):
+        super().__init__()
+        self.alpha = alpha   # [n_sinif] sınıf ağırlıkları (nadir sınıflara yüksek)
+        self.gamma = gamma
+
+    def forward(self, inputs, targets):
+        # inputs: [B, C, N]  targets: [B, N]
+        ce = F.cross_entropy(inputs, targets, weight=self.alpha, reduction="none")
+        pt = torch.exp(-ce)                          # tahmin olasılığı
+        focal = ((1 - pt) ** self.gamma) * ce        # kolay → küçük, zor → büyük
+        return focal.mean()
 
 # =============================================================================
 # AYARLAR
@@ -171,12 +196,12 @@ def egit():
     # Kayıp fonksiyonu: CrossEntropy (sınıf dengesizliği için ağırlıklı)
     # Kapı ve pencere daha az nokta içerir → daha yüksek ağırlık
     sinif_agirliklari = torch.tensor(
-        [1.0, 2.5, 3.5, 13.0, 9.0, 1.0, 3.5],  # wall,floor,ceiling,door,window,roof,eave
+        [1.0, 2.0, 2.0, 6.0, 5.0, 1.0, 2.0],   # wall,floor,ceiling,door,window,roof,eave
         dtype=torch.float32
     ).to(cihaz)
-    # Run2(door=20): wall%63/door%85  Run3(door=8): wall%87/door%63
-    # Bu run orta nokta: wall~80+ ve door~75+ hedefleniyor
-    kayip_fonk = nn.CrossEntropyLoss(weight=sinif_agirliklari)
+    # Focal Loss ile birlikte moderate ağırlıklar yeterli —
+    # γ=2 zaten zor sınıflara (door/window) otomatik odaklanır
+    kayip_fonk = FocalLoss(alpha=sinif_agirliklari, gamma=2.0)
 
     # Optimizer
     optimizer = optim.Adam(model.parameters(), lr=AYARLAR["ogrenme_hizi"])

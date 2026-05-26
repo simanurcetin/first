@@ -67,7 +67,7 @@ AYARLAR = {
     "nokta_klasoru":  "data/processed/pointclouds",
     "model_kayit":    "data/processed",
     "n_sinif":        7,
-    "epoch":          150,
+    "epoch":          200,
     "batch_size":     16,
     "ogrenme_hizi":   0.001,
     "test_orani":     0.15,
@@ -194,10 +194,10 @@ def egit():
     # Kayıp fonksiyonu: CrossEntropy (sınıf dengesizliği için ağırlıklı)
     # Kapı ve pencere daha az nokta içerir → daha yüksek ağırlık
     sinif_agirliklari = torch.tensor(
-        [1.0, 2.0, 4.0, 6.0, 5.0, 1.0, 2.0],   # wall,floor,ceiling,door,window,roof,eave
+        [1.0, 3.0, 2.0, 4.0, 3.5, 1.0, 2.0],   # wall,floor,ceiling,door,window,roof,eave
         dtype=torch.float32
     ).to(cihaz)
-    kayip_fonk = FocalLoss(alpha=sinif_agirliklari, gamma=2.0)
+    kayip_fonk = FocalLoss(alpha=sinif_agirliklari, gamma=1.0)
 
     # Optimizer
     optimizer = optim.Adam(model.parameters(), lr=AYARLAR["ogrenme_hizi"])

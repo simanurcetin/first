@@ -505,11 +505,45 @@ def mesh_renklendir(mesh, yuzey_siniflar):
 # Giriş:  mesh_giris (Mesh), calistir (bool)
 # Çıkış:  a (renkli mesh), rapor (metin), parametreler (JSON metin)
 
+def mesh_coerce(m):
+    """
+    Giriş gerçek bir Mesh degilse (ornegin Rhino'dan GUID referansi geldiyse)
+    onu gercek Rhino.Geometry.Mesh'e cevirir.
+    Type hint ayarlanmasa bile calismayi garantiler.
+    """
+    if m is None:
+        return None
+    if isinstance(m, rg.Mesh):
+        return m
+    # GUID → Rhino dokumanindan geometriyi getir
+    try:
+        import System
+        if isinstance(m, System.Guid):
+            obj = Rhino.RhinoDoc.ActiveDoc.Objects.FindId(m)
+            if obj is not None:
+                g = obj.Geometry
+                if isinstance(g, rg.Mesh):
+                    return g
+                # Brep/Extrusion ise mesh'e cevir
+                try:
+                    birlesik = rg.Mesh()
+                    for ms in rg.Mesh.CreateFromBrep(rg.Brep.TryConvertBrep(g),
+                                                     rg.MeshingParameters.Default):
+                        birlesik.Append(ms)
+                    if birlesik.Faces.Count > 0:
+                        return birlesik
+                except:
+                    pass
+    except:
+        pass
+    return m
+
 a           = None
 rapor       = "Mesh baglayin ve 'calistir' toggle'ini True yapin."
 parametreler = ""
 
 if "calistir" in dir() and calistir and "mesh_giris" in dir() and mesh_giris is not None:
+    mesh_giris = mesh_coerce(mesh_giris)
     siniflar, hata = analiz_et(mesh_giris)
     if hata:
         rapor = hata

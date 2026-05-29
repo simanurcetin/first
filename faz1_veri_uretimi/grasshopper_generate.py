@@ -28,28 +28,30 @@ import Rhino as _Rhino
 # PROJE KLASÖRÜ
 # =============================================================================
 
-_sabit_yol = ""  # Otomatik bulunamazsa: r"C:\Users\ADINIZ\Desktop\lorddoga"
+_sabit_yol = ""  # Otomatik bulunamazsa: r"C:\Users\ADINIZ\Desktop\first"
 
 def _proje_klasoru_bul():
+    if _sabit_yol:
+        return _sabit_yol
+    _up = os.environ.get("USERPROFILE", "C:\\Users\\User")
+    for _y in [
+        os.path.join(_up, "OneDrive", "Masaustu",  "first"),
+        os.path.join(_up, "OneDrive", "Masaüstü",  "first"),
+        os.path.join(_up, "OneDrive", "Desktop",   "first"),
+        os.path.join(_up, "Desktop",               "first"),
+        os.path.join(_up, "Masaüstü",              "first"),
+        os.path.join(_up, "Masaustu",              "first"),
+    ]:
+        if os.path.isdir(_y):
+            return _y
+    # Son çare: Rhino belgesi kaydedilmişse onun klasörü
     try:
         _doc_yol = _Rhino.RhinoDoc.ActiveDoc.Path
         if _doc_yol:
             return os.path.dirname(_doc_yol)
     except:
         pass
-    if _sabit_yol:
-        return _sabit_yol
-    _up = os.environ.get("USERPROFILE", "C:\\Users\\User")
-    for _y in [
-        os.path.join(_up, "OneDrive", "Masaustu",  "lorddoga"),
-        os.path.join(_up, "OneDrive", "Masaüstü",  "lorddoga"),
-        os.path.join(_up, "OneDrive", "Desktop",   "lorddoga"),
-        os.path.join(_up, "Desktop",               "lorddoga"),
-        os.path.join(_up, "Masaüstü",              "lorddoga"),
-    ]:
-        if os.path.isdir(_y):
-            return _y
-    return os.path.join(_up, "OneDrive", "Masaustu", "lorddoga")
+    return os.path.join(_up, "OneDrive", "Masaüstü", "first")
 
 _PROJE      = _proje_klasoru_bul()
 OBJ_KLASORU  = os.path.join(_PROJE, "data", "obj_files")

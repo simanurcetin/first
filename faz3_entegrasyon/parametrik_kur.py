@@ -23,19 +23,21 @@
 #
 # GRASSHOPPER GİRİŞLERİ (hepsi opsiyonel):
 #   parametre_json   (str)  → segment_v2'nin "parametre_json" çıkışını bağla
-#   --- aşağıdakiler boşsa JSON'daki değer, o da yoksa varsayılan kullanılır ---
-#   bina_genislik    (float)
-#   bina_derinlik    (float)
-#   kat_yuksekligi   (float)
-#   kat_sayisi       (int)
-#   cati_yukseklik   (float)  → 0 = düz çatı
-#   sacak_genislik   (float)
-#   pencere_olcek    (float)  → tüm pencereleri büyüt/küçült (1.0 = aynı)
-#   kapi_olcek       (float)  → tüm kapıları büyüt/küçült
+#
+#   --- EDITLEME ÇARPANLARI (slider) — hepsi 1.0'da "olculen gibi, degisme" ---
+#   --- ASLA mutlak metre girmezsin; sadece carpani oynatirsin ---
+#   genislik_olcek        (float)  1.0 = ayni,  1.2 = %20 genis
+#   derinlik_olcek        (float)  1.0 = ayni
+#   kat_yuksekligi_olcek  (float)  1.0 = ayni
+#   cati_olcek            (float)  1.0 = ayni,  0 = duz cati
+#   pencere_olcek         (float)  1.0 = ayni,  pencereleri buyut/kucult
+#   kapi_olcek            (float)  1.0 = ayni,  kapilari buyut/kucult
+#   kat_ekle              (int)    0 = ayni,  +1 = bir kat ekle, -1 = cikar
+#   sacak_genislik        (float)  mutlak, 0 = sacak yok
 #
 # ÇIKIŞLAR:
 #   a       → Brep listesi (editlenebilir bina modeli)
-#   bilgi   → kullanılan parametrelerin özeti (Panel)
+#   bilgi   → ölçülen → editlenen değerlerin özeti (Panel)
 # =============================================================================
 
 import Rhino.Geometry as rg
@@ -62,21 +64,33 @@ if _json:
     except:
         veri = {}
 
-# --- Temel parametreler: slider > JSON > varsayılan ---
-x   = float(_vars(globals().get("bina_genislik"),  veri.get("genislik",       8.0)))
-y   = float(_vars(globals().get("bina_derinlik"),  veri.get("derinlik",       6.0)))
-z   = float(_vars(globals().get("kat_yuksekligi"), veri.get("kat_yuksekligi", 3.0)))
-kat = int(  _vars(globals().get("kat_sayisi"),     veri.get("kat_sayisi",     1)))
-cati_yukseklik = float(_vars(globals().get("cati_yukseklik"), veri.get("cati_yukseklik", 1.5)))
-sacak_g    = float(_vars(globals().get("sacak_genislik"), 0.0))
-pen_olcek  = float(_vars(globals().get("pencere_olcek"), 1.0))
-kapi_olcek = float(_vars(globals().get("kapi_olcek"),    1.0))
+# --- TEMEL DEĞERLER: segment_v2 JSON'dan otomatik gelir (elle girilmez!) ---
+b_genislik = float(veri.get("genislik",       8.0))
+b_derinlik = float(veri.get("derinlik",       6.0))
+b_kat_yuk  = float(veri.get("kat_yuksekligi", 3.0))
+b_kat      = int(round(float(veri.get("kat_sayisi", 1))))
+b_cati     = float(veri.get("cati_yukseklik", 1.5))
+
+# --- EDITLEME ÇARPANLARI: hepsi 1.0'da = "olculen gibi, degisme" ---
+# Asla mutlak deger yazmazsin; sadece carpani oynatirsin.
+genislik_olcek       = float(_vars(globals().get("genislik_olcek"),       1.0))
+derinlik_olcek       = float(_vars(globals().get("derinlik_olcek"),       1.0))
+kat_yuksekligi_olcek = float(_vars(globals().get("kat_yuksekligi_olcek"), 1.0))
+cati_olcek           = float(_vars(globals().get("cati_olcek"),           1.0))
+pen_olcek            = float(_vars(globals().get("pencere_olcek"),        1.0))
+kapi_olcek           = float(_vars(globals().get("kapi_olcek"),           1.0))
+kat_ekle             = int(  _vars(globals().get("kat_ekle"),             0))   # +1/-1 kat
+sacak_g              = float(_vars(globals().get("sacak_genislik"),       0.0)) # mutlak (varsayilan yok)
+
+# --- Son değerler: olculen × carpan ---
+x   = max(2.0, b_genislik * genislik_olcek)
+y   = max(2.0, b_derinlik * derinlik_olcek)
+z   = max(2.0, b_kat_yuk  * kat_yuksekligi_olcek)
+kat = max(1,   b_kat + kat_ekle)
+cati_yukseklik = max(0.0, b_cati * cati_olcek)
 t = 0.2   # duvar kalınlığı
 
 acikliklar = veri.get("acikliklar", [])
-
-# Güvenli sınırlar
-x = max(2.0, x); y = max(2.0, y); z = max(2.0, z); kat = max(1, kat)
 
 # =============================================================================
 # GEOMETRİ YARDIMCILARI
@@ -197,12 +211,16 @@ n_kapi = sum(1 for ac in acikliklar if ac.get("tip") == "kapi")
 
 bilgi = "\n".join([
     "=== YENIDEN KURULAN PARAMETRIK MODEL ===",
-    "Kaynak: {}".format("segment_v2 JSON" if veri else "varsayilan/slider"),
-    "Bina: {:.2f} x {:.2f} m, kat yuk {:.2f} m x {} kat".format(x, y, z, kat),
-    "Cati yuksekligi: {:.2f} m {}".format(cati_yukseklik, "(duz)" if cati_yukseklik <= 0.05 else "(besik)"),
-    "Pencere: {}  Kapi: {}  (gercek konumlarda)".format(n_pen, n_kapi),
-    "Pencere olcek: x{:.2f}   Kapi olcek: x{:.2f}".format(pen_olcek, kapi_olcek),
+    "Kaynak: {}".format("segment_v2 JSON" if veri else "varsayilan"),
+    "Olculen -> Editlenen:",
+    "  Genislik: {:.2f} -> {:.2f} m  (x{:.2f})".format(b_genislik, x, genislik_olcek),
+    "  Derinlik: {:.2f} -> {:.2f} m  (x{:.2f})".format(b_derinlik, y, derinlik_olcek),
+    "  Kat yuk:  {:.2f} -> {:.2f} m  (x{:.2f})".format(b_kat_yuk, z, kat_yuksekligi_olcek),
+    "  Kat sayi: {} -> {}  (+{})".format(b_kat, kat, kat_ekle),
+    "  Cati:     {:.2f} -> {:.2f} m  (x{:.2f})".format(b_cati, cati_yukseklik, cati_olcek),
+    "Pencere: {} (x{:.2f})   Kapi: {} (x{:.2f})  [gercek konumlarda]".format(
+        n_pen, pen_olcek, n_kapi, kapi_olcek),
     "Toplam eleman: {}".format(len(a)),
     "",
-    ">> bina_genislik / kat_sayisi / pencere_olcek ... slider'lari ile editle.",
+    ">> TUM carpanlar 1.0 = olculen gibi. Oynat = editle. Mutlak deger GIRME.",
 ])

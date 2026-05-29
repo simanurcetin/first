@@ -91,6 +91,7 @@ class MimariDataset(Dataset):
         # Eğitim sırasında veri artırma uygula (xyz + normaller birlikte döndürülür)
         if self.egitim:
             xyz, normaller = self._veri_artir(xyz, normaller)
+            xyz, normaller, etiketler = self._nokta_dropout(xyz, normaller, etiketler)
 
         # xyz ve normalleri birleştir → [2048, 6]
         xyz_normal = np.concatenate([xyz, normaller], axis=1).astype(np.float32)
@@ -104,33 +105,82 @@ class MimariDataset(Dataset):
     def _veri_artir(self, xyz, normaller):
         """
         Eğitim sırasında nokta bulutunu rastgele dönüştürür.
-        Normal vektörler de aynı rotasyona tabi tutulur (öteleme/ölçek uygulanmaz).
+        Normal vektörler de aynı rotasyona tabi tutulur.
+
+        Meshy AI gibi "alan dışı" modellere genelleme için güçlü augmentation:
+          - Tam 360° Z dönüşü (bina yönü farklı gelebilir)
+          - Her eksen ayrı ölçek (farklı bina oranları)
+          - Küçük X/Y eğimi (modelin tam dik gelmeme durumu)
+          - Güçlü xyz + normal gürültüsü (organik/gürültülü mesh)
         """
-        # Z ekseni etrafında rastgele döndür (0-360° sürekli)
-        aci_rad = np.random.uniform(0, 2 * np.pi)
-        donme_matrisi = np.array([
-            [np.cos(aci_rad), -np.sin(aci_rad), 0],
-            [np.sin(aci_rad),  np.cos(aci_rad), 0],
-            [0,                0,               1]
-        ], dtype=np.float32)
-        xyz      = xyz @ donme_matrisi.T
-        normaller = normaller @ donme_matrisi.T  # Normaller de döndürülür
+        # 1. Z ekseni etrafında tam 360° döndür
+        aci = np.random.uniform(0, 2 * np.pi)
+        cz, sz = np.cos(aci), np.sin(aci)
+        Rz = np.array([[cz, -sz, 0],
+                       [sz,  cz, 0],
+                       [0,   0,  1]], dtype=np.float32)
+        xyz       = xyz @ Rz.T
+        normaller = normaller @ Rz.T
 
-        # Rastgele ölçek (±10%) — sadece xyz'ye uygulanır
-        olcek = np.random.uniform(0.9, 1.1)
-        xyz *= olcek
+        # 2. Küçük X/Y eğimi (±8°) — zemin/tavan normalini fazla bozmaz
+        for eksen in [0, 1]:
+            egim = np.random.uniform(-0.14, 0.14)   # ~±8 derece
+            c, s = np.cos(egim), np.sin(egim)
+            if eksen == 0:   # X ekseni etrafında
+                R = np.array([[1, 0, 0],
+                              [0, c, -s],
+                              [0, s,  c]], dtype=np.float32)
+            else:            # Y ekseni etrafında
+                R = np.array([[ c, 0, s],
+                              [ 0, 1, 0],
+                              [-s, 0, c]], dtype=np.float32)
+            xyz       = xyz @ R.T
+            normaller = normaller @ R.T
 
-        # Küçük Gaussian gürültü (xyz'ye)
-        xyz += np.random.normal(0, 0.005, xyz.shape).astype(np.float32)
+        # 3. Anizotropik ölçek — her eksen bağımsız (farklı bina oranları)
+        for k in range(3):
+            xyz[:, k] *= np.random.uniform(0.75, 1.25)
 
-        # xyz normalize et
-        merkez = xyz.mean(axis=0)
-        xyz -= merkez
+        # 4. Güçlü xyz gürültüsü (organik/gürültülü mesh'lere dayanıklılık)
+        xyz += np.random.normal(0, 0.015, xyz.shape).astype(np.float32)
+
+        # 5. Normal vektörlere hafif gürültü (normalize et sonrasında)
+        normaller += np.random.normal(0, 0.05, normaller.shape).astype(np.float32)
+        uzunluk = np.linalg.norm(normaller, axis=1, keepdims=True)
+        uzunluk = np.where(uzunluk > 0, uzunluk, 1.0)
+        normaller /= uzunluk
+
+        # 6. xyz'yi yeniden normalize et (birim küre)
+        xyz -= xyz.mean(axis=0)
         en_uzak = np.max(np.sqrt(np.sum(xyz ** 2, axis=1)))
         if en_uzak > 0:
             xyz /= en_uzak
 
         return xyz, normaller
+
+    def _nokta_dropout(self, xyz, normaller, etiketler, oran=0.1):
+        """
+        Noktaların rastgele bir kısmını düşürür, yerine var olan noktaları kopyalar.
+        Delikli/seyrek/eksik mesh'lere dayanıklılık sağlar.
+        Beklenen dropout: %0–10 arası rastgele.
+        """
+        n = len(xyz)
+        gercek_oran = np.random.uniform(0, oran)
+        n_dusur = int(n * gercek_oran)
+        if n_dusur == 0:
+            return xyz, normaller, etiketler
+
+        # Düşürülecek indeksler
+        dusur = np.random.choice(n, size=n_dusur, replace=False)
+        # Onların yerine kalan noktalardan rastgele kopyala
+        kalan = np.setdiff1d(np.arange(n), dusur)
+        kopyalar = np.random.choice(kalan, size=n_dusur, replace=True)
+
+        xyz[dusur]       = xyz[kopyalar]
+        normaller[dusur] = normaller[kopyalar]
+        etiketler[dusur] = etiketler[kopyalar]
+
+        return xyz, normaller, etiketler
 
 
 def loader_olustur(klasor, batch_size=16, test_orani=0.15):

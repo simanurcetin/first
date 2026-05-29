@@ -1008,19 +1008,19 @@ def ana_uretim():
 # GRASSHOPPER ÇIKTI BLOĞU
 # =============================================================================
 #
-# GH Python Script bileşenine şu parametreleri ekleyin:
+# Ekstra bileşen gerekmez — GHPython'da 'a' çıktısı viewport'ta otomatik görünür.
 #
-#   GİRİŞ (sağ tık → "Add Input"):
-#     model_no    → Integer (Number Slider, 0-499 arası)
-#     kaydet_tumu → Boolean (Toggle, True = 500 model üret ve kaydet)
-#
-#   ÇIKIŞ (sağ tık → "Add Output"):
-#     cikti_mesh  → Mesh Preview bileşenine bağlayın
-#     rapor       → Panel bileşenine bağlayın
+# İSTEĞE BAĞLI: Number Slider bağlamak için
+#   Bileşene sağ tık → ZUI → "model_no" girişi ekle → Slider bağla (0-499)
 #
 # Renk kodları:
-#   Gri   = duvar    Kahve = döşeme   Açık mavi = tavan
-#   Koyu kahve = kapı  Mavi = pencere  Kırmızı = çatı  Turuncu = saçak
+#   Gri        = duvar (wall)
+#   Kahve      = döşeme (floor)
+#   Açık mavi  = tavan (ceiling)
+#   Koyu kahve = kapı (door)
+#   Mavi       = pencere (window)
+#   Kırmızı    = çatı (roof)
+#   Turuncu    = saçak (eave)
 # =============================================================================
 
 SINIF_RENKLERI = {
@@ -1054,14 +1054,15 @@ def mesh_renklendir(mesh, etiketler):
     return mesh
 
 # --- Grasshopper çıkışları ---
-cikti_mesh = None
-rapor      = ""
+# 'a' değişkeni GHPython'un varsayılan çıktısı → tel bağlamadan viewport'ta görünür
+a     = None
+rapor = ""
 
 try:
     _id = int(model_no) if "model_no" in dir() else 0
     _uretici = BinaUretici(_id)
     _mesh, _etiketler, _bilgi = _uretici.bina_uret(_id)
-    cikti_mesh = mesh_renklendir(_mesh, _etiketler)
+    a = mesh_renklendir(_mesh, _etiketler)
 
     from collections import Counter as _C
     _sayac = _C(_etiketler)
@@ -1082,13 +1083,15 @@ try:
 except Exception as _e:
     rapor = "Hata: " + str(_e)
 
+print(rapor)   # GHPython "out" panelinde görünür
+
 # 500 model kaydetme (kaydet_tumu = True yapınca çalışır)
 if "kaydet_tumu" in dir() and kaydet_tumu:
     try:
         _basarili = ana_uretim()
-        rapor = rapor + "\n\n500 model kaydedildi! ({} basarili)".format(_basarili)
+        print("\n500 model kaydedildi! ({} basarili)".format(_basarili))
     except Exception as _e:
-        rapor = rapor + "\n\nKaydetme hatasi: " + str(_e)
+        print("Kaydetme hatasi: " + str(_e))
 
 # Standart Python'dan çalıştırılırsa (Grasshopper dışı)
 if __name__ == "__main__":

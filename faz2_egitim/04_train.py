@@ -197,7 +197,7 @@ def egit():
     # Focal Loss yerine plain CrossEntropy: ikisi de yatay yüzey olduğundan
     # Focal Loss biri öğrenince diğerini tamamen bırakıyordu
     sinif_agirliklari = torch.tensor(
-        [1.0, 3.0, 3.0, 5.0, 4.0, 1.0, 2.0],   # wall,floor,ceiling,door,window,roof,eave
+        [2.0, 3.0, 3.0, 4.0, 3.0, 1.0, 2.5],   # wall,floor,ceiling,door,window,roof,eave
         dtype=torch.float32
     ).to(cihaz)
     kayip_fonk = nn.CrossEntropyLoss(weight=sinif_agirliklari)

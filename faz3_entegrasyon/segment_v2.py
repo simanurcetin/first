@@ -280,14 +280,28 @@ def analiz_et(mesh):
         "python", kopru_py,
         giris_json, cikis_json, MODEL_YOLU, PROJE_KLASORU
     ]
+    # GhPython = IronPython 2.7 → subprocess.run / TimeoutExpired YOK.
+    # Bu yuzden Popen + communicate() ile 2.7 uyumlu calistiriyoruz.
     try:
-        sonuc = subprocess.run(komut, capture_output=True, text=True, timeout=120)
-        if sonuc.returncode != 0:
-            return None, "Model hatasi:\n" + sonuc.stderr[:600]
-    except subprocess.TimeoutExpired:
-        return None, "Hata: Model 120 saniyede yanit vermedi."
+        proc = subprocess.Popen(
+            komut,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=False
+        )
+        cikti, hata_cikti = proc.communicate()
+        if proc.returncode != 0:
+            mesaj = hata_cikti if hata_cikti else cikti
+            try:
+                mesaj = mesaj.decode("utf-8", "ignore")
+            except:
+                mesaj = str(mesaj)
+            return None, "Model hatasi:\n" + mesaj[:600]
     except Exception as e:
-        return None, "Hata: " + str(e)
+        return None, "Hata (subprocess): " + str(e)
+
+    if not os.path.exists(cikis_json):
+        return None, "Hata: Model cikti uretmedi (cikis_json yok)."
 
     with open(cikis_json, "r") as f:
         nokta_tahminleri = json.load(f)["tahminler"]

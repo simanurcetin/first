@@ -1093,6 +1093,5 @@ if "kaydet_tumu" in dir() and kaydet_tumu:
     except Exception as _e:
         print("Kaydetme hatasi: " + str(_e))
 
-# Standart Python'dan çalıştırılırsa (Grasshopper dışı)
-if __name__ == "__main__":
-    ana_uretim()
+# Not: Grasshopper'da __name__ == "__main__" olduğu için bu blok kasıtlı kaldırıldı.
+# 500 model üretmek için kaydet_tumu girişini True yapın.

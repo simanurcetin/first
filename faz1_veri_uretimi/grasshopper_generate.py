@@ -1,1097 +1,268 @@
 # -*- coding: utf-8 -*-
 # =============================================================================
-# FAZ 1 - SENTETIK BINA MODELI URETICISI
+# FAZ 1 - SENTETİK BİNA MODELİ ÜRETİCİSİ (Brep tabanlı)
 # =============================================================================
 #
-# BU DOSYA GRASSHOPPER'IN "PYTHON SCRIPT" BİLEŞENİNE YAPIŞTIRILIR.
+# Grasshopper'da Trigger bileşeniyle tetiklenerek çalışır.
+# Her tetiklemede 1 rastgele bina üretir, OBJ + JSON kaydeder.
 #
-# NASIL KULLANILIR:
-#   1. Rhino + Grasshopper'ı açın
-#   2. Grasshopper'a bir "Python Script" bileşeni sürükleyin
-#   3. Bu dosyanın tüm içeriğini kopyalayıp yapıştırın
-#   4. Bileşene sağ tıklayın → "Run" veya bileşeni etkinleştirin
-#   5. Script çalışınca data/obj_files ve data/json_files klasörlerini dolduracak
+# OBJ grup adları → sınıf etiketleri (01_obj_to_pointcloud.py okur):
+#   zemin_*  → 1 (floor)     tavan_*  → 2 (ceiling)
+#   *duvar   → 0 (wall)      *kapi_*  → 3 (door bölgesi)
+#   *pen_*   → 4 (window bölgesi)
+#   cati_*   → 5 (roof)      sacak_*  → 6 (eave)
 #
-# ÇIKTI:
-#   - 500 adet  .obj  dosyası  (3D geometri - yüzeyler)
-#   - 500 adet  .json dosyası  (hangi yüzey hangi sınıf: wall/floor/window...)
-#
-# IronPython KISITLAMALARI (Grasshopper içinde):
-#   ✓ rhinoscriptsyntax  → Rhino nesneleri
-#   ✓ Rhino.Geometry     → Nokta, vektör, mesh
-#   ✓ math               → sin, cos, pi, sqrt
-#   ✓ json               → dosya yazma
-#   ✓ random             → rastgelelik
-#   ✓ os                 → klasör oluşturma
-#   ✗ numpy, scipy, pip  → KULLANILAMAZ
-#
-# SEMANTİK SINIFLAR (7 adet, config.json ile uyumlu):
-#   0 = wall    (duvar)
-#   1 = floor   (döşeme)
-#   2 = ceiling (tavan)
-#   3 = door    (kapı)
-#   4 = window  (pencere)
-#   5 = roof    (çatı)
-#   6 = eave    (saçak)
+# Grasshopper bağlantısı:
+#   - Trigger bileşeni → bu scripte bağla (her tık = 1 model)
+#   - 'a' çıktısı → Rhino viewport'ta renkli önizleme
 # =============================================================================
 
-import rhinoscriptsyntax as rs   # Rhino çizim fonksiyonları
-import Rhino.Geometry as rg      # Düşük seviye geometri: Point3d, Mesh...
-import math                       # Trigonometri (sin, cos, pi)
-import json                       # JSON dosya kaydetme
-import random                     # Rastgele sayı üretimi
-import os                         # Klasör oluşturma, dosya yolu
-
-# =============================================================================
-# AYARLAR - Buradaki değerleri değiştirerek üretimi özelleştirebilirsiniz
-# =============================================================================
-
-# Kaç model üretilecek?
-MODEL_SAYISI = 500
-
-# Dosyaların kaydedileceği klasörler
-#
-# Grasshopper'da __file__ çalışmaz, bu yüzden yolu 3 yöntemle bulmaya çalışıyoruz:
-#   Yöntem 1: Rhino belgesi kaydedilmişse onun klasörünü kullan
-#   Yöntem 2: Masaüstündeki lorddoga klasörünü kullan
-#   Yöntem 3: Aşağıdaki SABIT_YOL satırını açıp kendi yolunuzu yazın
-#
+import Rhino.Geometry as rg
+import random
+import json
+import os
+import time
 import Rhino as _Rhino
 
-_sabit_yol = ""   # ← Otomatik bulunamazsa buraya yazın: r"C:\Users\ADINIZ\Desktop\lorddoga"
+# =============================================================================
+# PROJE KLASÖRÜ
+# =============================================================================
+
+_sabit_yol = ""  # Otomatik bulunamazsa: r"C:\Users\ADINIZ\Desktop\lorddoga"
 
 def _proje_klasoru_bul():
-    # Yöntem 1: Açık Rhino belgesi kaydedilmişse
     try:
         _doc_yol = _Rhino.RhinoDoc.ActiveDoc.Path
         if _doc_yol:
             return os.path.dirname(_doc_yol)
     except:
         pass
-    # Yöntem 2: Sabit yol tanımlanmışsa
     if _sabit_yol:
         return _sabit_yol
-    # Yöntem 3: Olası masaüstü konumlarını sırayla dene
-    _userprofile = os.environ.get("USERPROFILE", "C:\\Users\\User")
-    _aday_yollar = [
-        os.path.join(_userprofile, "OneDrive", "Masaustu", "lorddoga"),
-        os.path.join(_userprofile, "OneDrive", "Masaüstü", "lorddoga"),
-        os.path.join(_userprofile, "OneDrive", "Desktop", "lorddoga"),
-        os.path.join(_userprofile, "Masaustu", "lorddoga"),
-        os.path.join(_userprofile, "Masaüstü", "lorddoga"),
-        os.path.join(_userprofile, "Desktop", "lorddoga"),
-    ]
-    for _y in _aday_yollar:
+    _up = os.environ.get("USERPROFILE", "C:\\Users\\User")
+    for _y in [
+        os.path.join(_up, "OneDrive", "Masaustu",  "lorddoga"),
+        os.path.join(_up, "OneDrive", "Masaüstü",  "lorddoga"),
+        os.path.join(_up, "OneDrive", "Desktop",   "lorddoga"),
+        os.path.join(_up, "Desktop",               "lorddoga"),
+        os.path.join(_up, "Masaüstü",              "lorddoga"),
+    ]:
         if os.path.isdir(_y):
             return _y
-    # Hiçbiri yoksa OneDrive\Masaustu varsayılan (senin durumun)
-    return os.path.join(_userprofile, "OneDrive", "Masaustu", "lorddoga")
+    return os.path.join(_up, "OneDrive", "Masaustu", "lorddoga")
 
-_PROJE = _proje_klasoru_bul()
+_PROJE      = _proje_klasoru_bul()
 OBJ_KLASORU  = os.path.join(_PROJE, "data", "obj_files")
 JSON_KLASORU = os.path.join(_PROJE, "data", "json_files")
 
-# Rastgelelik için tohum - aynı tohum = aynı modeller (tekrarlanabilirlik)
-TOHUM = 42
-
-# Semantik sınıf kimlikleri
-SINIF = {
-    "wall":    0,   # duvar
-    "floor":   1,   # döşeme
-    "ceiling": 2,   # tavan
-    "door":    3,   # kapı
-    "window":  4,   # pencere
-    "roof":    5,   # çatı
-    "eave":    6,   # saçak
-}
+for _k in [OBJ_KLASORU, JSON_KLASORU]:
+    if not os.path.exists(_k):
+        os.makedirs(_k)
 
 # =============================================================================
-# YARDIMCI: MESH OLUŞTURMA FONKSİYONLARI
-# (IronPython'da numpy yok, elle yapıyoruz)
+# BİNA ÜRETİCİ
 # =============================================================================
 
-def yeni_mesh():
-    """Boş bir Rhino Mesh nesnesi oluşturur."""
-    return rg.Mesh()
+x = round(random.uniform(4.0, 10.0), 2)
+y = round(random.uniform(4.0, 10.0), 2)
+z = round(random.uniform(2.4,  3.5), 2)
+t = 0.2
+katlar = random.choice([1, 2])
 
-def mesh_e_quad_ekle(mesh, p0, p1, p2, p3):
-    """
-    4 köşeli bir yüzey (quad face) ekler.
-    p0-p3: rg.Point3d nesneleri (x, y, z koordinatları)
+u       = round(random.uniform(0.8, min(1.2, x / 3)), 2)
+v_kapi  = round(random.uniform(2.0, min(2.4, z - 0.2)), 2)
+kapi_cephe  = random.choice(["on", "arka", "sol", "sag"])
+kapi_offset = round(random.uniform(0.3, max(0.31, x - u - 0.3)), 2)
 
-    Quad = dörtgen yüzey. Bina modellerinde duvarlar, pencereler
-    hep dörtgen olduğu için quad kullanıyoruz.
-    """
-    # Mevcut köşe sayısını başlangıç indeksi olarak al
-    i = mesh.Vertices.Count
-    # 4 köşeyi mesh'e ekle
-    mesh.Vertices.Add(p0.X, p0.Y, p0.Z)
-    mesh.Vertices.Add(p1.X, p1.Y, p1.Z)
-    mesh.Vertices.Add(p2.X, p2.Y, p2.Z)
-    mesh.Vertices.Add(p3.X, p3.Y, p3.Z)
-    # Bu 4 köşeyi birleştiren dörtgen yüzey ekle
-    mesh.Faces.AddFace(i, i+1, i+2, i+3)
+pen_cepheler = random.sample(["on", "arka", "sol", "sag"], random.randint(1, 4))
+pen_g   = round(random.uniform(0.6, min(1.5, x / 3)), 2)
+pen_y   = round(random.uniform(0.6, 1.0), 2)
+pen_deniz = round(random.uniform(0.7, 1.0), 2)
 
-def mesh_e_tri_ekle(mesh, p0, p1, p2):
-    """
-    3 köşeli bir yüzey (triangle face) ekler.
-    Üçgen çatı tepelerinde kullanılır.
-    """
-    i = mesh.Vertices.Count
-    mesh.Vertices.Add(p0.X, p0.Y, p0.Z)
-    mesh.Vertices.Add(p1.X, p1.Y, p1.Z)
-    mesh.Vertices.Add(p2.X, p2.Y, p2.Z)
-    mesh.Faces.AddFace(i, i+1, i+2)
+cati_yukseklik = round(random.uniform(1.0, 2.0), 2)
+sacak_g        = round(random.uniform(0.2, 0.6), 2)
+sacak_cepheler = random.sample(["on", "arka", "sol", "sag"], random.randint(1, 4))
 
-def p3d(x, y, z):
-    """Kısa yol: rg.Point3d(x, y, z) oluşturur."""
-    return rg.Point3d(x, y, z)
+# ── Yardımcı ──────────────────────────────────────────────────
+
+def kutu(x0, y0, z0, x1, y1, z1):
+    bb = rg.BoundingBox(rg.Point3d(x0, y0, z0), rg.Point3d(x1, y1, z1))
+    return rg.Box(bb).ToBrep()
+
+def on_duvar(zb, zh, kapi=False, pen=False):
+    p = {}
+    if kapi:
+        ko = kapi_offset
+        p["kapi_sol"] = kutu(0,    0, zb, ko,    t, zb + zh)
+        p["kapi_sag"] = kutu(ko+u, 0, zb, x,     t, zb + zh)
+        p["kapi_ust"] = kutu(ko,   0, zb + v_kapi, ko + u, t, zb + zh)
+    elif pen:
+        po = round(random.uniform(0.3, max(0.31, x - pen_g - 0.3)), 2)
+        p["pen_sol"] = kutu(0,       0, zb,              po,       t, zb + zh)
+        p["pen_sag"] = kutu(po+pen_g, 0, zb,             x,        t, zb + zh)
+        p["pen_alt"] = kutu(po,       0, zb,              po+pen_g, t, zb + pen_deniz)
+        p["pen_ust"] = kutu(po,       0, zb+pen_deniz+pen_y, po+pen_g, t, zb + zh)
+    else:
+        p["duvar"] = kutu(0, 0, zb, x, t, zb + zh)
+    return p
+
+def arka_duvar(zb, zh, kapi=False, pen=False):
+    p = {}
+    if kapi:
+        ko = kapi_offset
+        p["kapi_sol"] = kutu(0,    y-t, zb, ko,    y, zb + zh)
+        p["kapi_sag"] = kutu(ko+u, y-t, zb, x,     y, zb + zh)
+        p["kapi_ust"] = kutu(ko,   y-t, zb + v_kapi, ko + u, y, zb + zh)
+    elif pen:
+        po = round(random.uniform(0.3, max(0.31, x - pen_g - 0.3)), 2)
+        p["pen_sol"] = kutu(0,        y-t, zb,              po,       y, zb + zh)
+        p["pen_sag"] = kutu(po+pen_g, y-t, zb,              x,        y, zb + zh)
+        p["pen_alt"] = kutu(po,       y-t, zb,              po+pen_g, y, zb + pen_deniz)
+        p["pen_ust"] = kutu(po,       y-t, zb+pen_deniz+pen_y, po+pen_g, y, zb + zh)
+    else:
+        p["duvar"] = kutu(0, y-t, zb, x, y, zb + zh)
+    return p
+
+def sol_duvar(zb, zh, kapi=False, pen=False):
+    p = {}
+    if kapi:
+        ko = kapi_offset
+        p["kapi_sol"] = kutu(0, 0,    zb, t, ko,    zb + zh)
+        p["kapi_sag"] = kutu(0, ko+u, zb, t, y,     zb + zh)
+        p["kapi_ust"] = kutu(0, ko,   zb + v_kapi, t, ko + u, zb + zh)
+    elif pen:
+        po = round(random.uniform(0.3, max(0.31, y - pen_g - 0.3)), 2)
+        p["pen_sol"] = kutu(0, 0,        zb,              t, po,       zb + zh)
+        p["pen_sag"] = kutu(0, po+pen_g, zb,              t, y,        zb + zh)
+        p["pen_alt"] = kutu(0, po,       zb,              t, po+pen_g, zb + pen_deniz)
+        p["pen_ust"] = kutu(0, po,       zb+pen_deniz+pen_y, t, po+pen_g, zb + zh)
+    else:
+        p["duvar"] = kutu(0, 0, zb, t, y, zb + zh)
+    return p
+
+def sag_duvar(zb, zh, kapi=False, pen=False):
+    p = {}
+    if kapi:
+        ko = kapi_offset
+        p["kapi_sol"] = kutu(x-t, 0,    zb, x, ko,    zb + zh)
+        p["kapi_sag"] = kutu(x-t, ko+u, zb, x, y,     zb + zh)
+        p["kapi_ust"] = kutu(x-t, ko,   zb + v_kapi, x, ko + u, zb + zh)
+    elif pen:
+        po = round(random.uniform(0.3, max(0.31, y - pen_g - 0.3)), 2)
+        p["pen_sol"] = kutu(x-t, 0,        zb,              x, po,       zb + zh)
+        p["pen_sag"] = kutu(x-t, po+pen_g, zb,              x, y,        zb + zh)
+        p["pen_alt"] = kutu(x-t, po,       zb,              x, po+pen_g, zb + pen_deniz)
+        p["pen_ust"] = kutu(x-t, po,       zb+pen_deniz+pen_y, x, po+pen_g, zb + zh)
+    else:
+        p["duvar"] = kutu(x-t, 0, zb, x, y, zb + zh)
+    return p
+
+def kat_uret(kat_no):
+    zb = kat_no * z
+    el = {}
+    el["zemin_{}".format(kat_no)] = kutu(0, 0, zb,       x, y, zb + t)
+    el["tavan_{}".format(kat_no)] = kutu(0, 0, zb+z-t,   x, y, zb + z)
+    for cephe in ["on", "arka", "sol", "sag"]:
+        has_kapi = (cephe == kapi_cephe and kat_no == 0)
+        has_pen  = (cephe in pen_cepheler)
+        prefix   = "{}_{}".format(cephe, kat_no)
+        if   cephe == "on":   p = on_duvar  (zb, z, has_kapi, has_pen and not has_kapi)
+        elif cephe == "arka": p = arka_duvar(zb, z, has_kapi, has_pen and not has_kapi)
+        elif cephe == "sol":  p = sol_duvar (zb, z, has_kapi, has_pen and not has_kapi)
+        else:                 p = sag_duvar (zb, z, has_kapi, has_pen and not has_kapi)
+        for k, brep in p.items():
+            el["{}_{}".format(prefix, k)] = brep
+    return el
+
+# ── Model ─────────────────────────────────────────────────────
+
+tum = {}
+for k in range(katlar):
+    tum.update(kat_uret(k))
+
+z_top = katlar * z
+p0 = rg.Point3d(0,   0, z_top);  p1 = rg.Point3d(x,   0, z_top)
+p2 = rg.Point3d(x,   y, z_top);  p3 = rg.Point3d(0,   y, z_top)
+p4 = rg.Point3d(x/2, 0, z_top + cati_yukseklik)
+p5 = rg.Point3d(x/2, y, z_top + cati_yukseklik)
+
+for isim, pts in [
+    ("cati_sol",  (p0, p4, p5, p3)),
+    ("cati_sag",  (p4, p1, p2, p5)),
+    ("cati_on",   (p0, p1, p4, p4)),
+    ("cati_arka", (p3, p5, p2, p2)),
+]:
+    b = rg.Brep.CreateFromCornerPoints(pts[0], pts[1], pts[2], pts[3], 0.01)
+    if b:
+        tum[isim] = b
+
+if "on"   in sacak_cepheler: tum["sacak_on"]   = kutu(-sacak_g, -sacak_g, z_top-t, x+sacak_g, 0,        z_top)
+if "arka" in sacak_cepheler: tum["sacak_arka"]  = kutu(-sacak_g, y,        z_top-t, x+sacak_g, y+sacak_g, z_top)
+if "sol"  in sacak_cepheler: tum["sacak_sol"]   = kutu(-sacak_g, -sacak_g, z_top-t, 0,         y+sacak_g, z_top)
+if "sag"  in sacak_cepheler: tum["sacak_sag"]   = kutu(x,        -sacak_g, z_top-t, x+sacak_g, y+sacak_g, z_top)
 
 # =============================================================================
-# YARDIMCI: OBJ + JSON KAYDETME
+# OBJ KAYDET
 # =============================================================================
 
-def obj_olarak_kaydet(mesh, dosya_yolu):
-    """
-    Rhino Mesh nesnesini .obj formatında kaydeder.
+def brep_to_mesh(brep):
+    if brep is None:
+        return None
+    m = rg.Mesh()
+    for ms in rg.Mesh.CreateFromBrep(brep, rg.MeshingParameters.Default):
+        m.Append(ms)
+    return m
 
-    OBJ formatı çok basit bir 3D dosya formatıdır:
-    - 'v' satırları: köşe koordinatları (vertex)
-    - 'f' satırları: yüzey tanımları (face) - hangi köşeler birbirine bağlı
+def sonraki_id():
+    dosyalar = [f for f in os.listdir(OBJ_KLASORU) if f.endswith(".obj")]
+    return len(dosyalar)
 
-    Örnek OBJ dosyası:
-        v 0.0 0.0 0.0    ← köşe 1: orijin
-        v 5.0 0.0 0.0    ← köşe 2
-        v 5.0 0.0 3.0    ← köşe 3
-        v 0.0 0.0 3.0    ← köşe 4
-        f 1 2 3 4        ← bu 4 köşe bir yüzey oluşturur
-    """
-    satirlar = ["# Mimari AI - Sentetik Bina Modeli\n"]
+bina_id  = sonraki_id()
+obj_yolu  = os.path.join(OBJ_KLASORU,  "bina_{:04d}.obj".format(bina_id))
+json_yolu = os.path.join(JSON_KLASORU, "bina_{:04d}.json".format(bina_id))
 
-    # Tüm köşeleri yaz
-    for i in range(mesh.Vertices.Count):
-        v = mesh.Vertices[i]
-        satirlar.append("v {:.6f} {:.6f} {:.6f}\n".format(v.X, v.Y, v.Z))
-
-    # Tüm yüzeyleri yaz (OBJ'de indeksler 1'den başlar, Python'da 0'dan)
-    for i in range(mesh.Faces.Count):
-        f = mesh.Faces[i]
+obj_satirlar = ["# Mimari AI - bina_{:04d}".format(bina_id)]
+vo = 0
+for isim, brep in tum.items():
+    if brep is None:
+        continue
+    m = brep_to_mesh(brep)
+    if m is None:
+        continue
+    obj_satirlar.append("g " + isim)
+    for vp in m.Vertices:
+        obj_satirlar.append("v {:.4f} {:.4f} {:.4f}".format(vp.X, vp.Y, vp.Z))
+    for f in m.Faces:
         if f.IsTriangle:
-            # Üçgen yüzey
-            satirlar.append("f {} {} {}\n".format(f.A+1, f.B+1, f.C+1))
+            obj_satirlar.append("f {} {} {}".format(f.A+vo+1, f.B+vo+1, f.C+vo+1))
         else:
-            # Dörtgen yüzey
-            satirlar.append("f {} {} {} {}\n".format(f.A+1, f.B+1, f.C+1, f.D+1))
-
-    with open(dosya_yolu, "w") as f:
-        f.writelines(satirlar)
-
-def json_olarak_kaydet(veri, dosya_yolu):
-    """
-    Sözlük (dict) verisini .json formatında kaydeder.
-
-    JSON formatı: insan okuyabilir veri formatı.
-    Örnek:
-        {
-          "model_id": 42,
-          "parametreler": {"genislik": 10.0, ...},
-          "yuzey_etiketleri": [0, 0, 1, 4, 4, ...]
-        }
-
-    Bu JSON dosyası Faz 2'de hangi yüzeyin hangi sınıfa ait olduğunu gösterir.
-    PointNet eğitimi bu etiketleri kullanır.
-    """
-    with open(dosya_yolu, "w") as f:
-        json.dump(veri, f, indent=2, ensure_ascii=True)
-
-# =============================================================================
-# BİNA ÜRETME MOTORU
-# =============================================================================
-
-class BinaUretici:
-    """
-    Rastgele parametrik bina modeli üretir.
-
-    Her çağrıda farklı ölçü, kat sayısı, pencere yerleşimi,
-    çatı tipi üretir ve hem geometriyi (mesh) hem etiketleri (labels) döndürür.
-    """
-
-    def __init__(self, tohum_degeri):
-        # Rastgele sayı üreticisini başlat
-        # Aynı tohum → aynı sonuçlar (bilimsel tekrarlanabilirlik için önemli)
-        self.rng = random.Random(tohum_degeri)
-
-    def rastgele(self, min_deger, max_deger):
-        """min ile max arasında rastgele ondalıklı sayı üretir."""
-        return self.rng.uniform(min_deger, max_deger)
-
-    def rastgele_int(self, min_deger, max_deger):
-        """min ile max arasında rastgele tam sayı üretir."""
-        return self.rng.randint(min_deger, max_deger)
-
-    def secim(self, liste):
-        """Listeden rastgele bir eleman seçer."""
-        return self.rng.choice(liste)
-
-    # -------------------------------------------------------------------------
-    # ANA FONKSİYON: Tek bir bina modeli üret
-    # -------------------------------------------------------------------------
-
-    def bina_uret(self, model_id):
-        """
-        model_id: Bu modelin sıra numarası (0-499)
-
-        Döndürür:
-            mesh:   Rhino Mesh nesnesi (tüm yüzeyler birleştirilmiş)
-            etiket: Liste - her yüzey için sınıf kodu [0,0,1,4,4,5,5,...]
-            bilgi:  Sözlük - modelin parametreleri (JSON'a kaydedilecek)
-        """
-
-        # --- Bina Parametrelerini Rastgele Seç ---
-        genislik    = self.rastgele(6.0, 20.0)     # X yönü (metre)
-        derinlik    = self.rastgele(6.0, 20.0)     # Y yönü (metre)
-        kat_sayisi  = self.rastgele_int(1, 5)       # Kat adedi
-        kat_h       = 3.0                           # Her kat yüksekliği (sabit 3m)
-        toplam_h    = kat_sayisi * kat_h            # Toplam bina yüksekliği
-
-        # Bina planı tipi
-        plan_tipi   = self.secim(["dikdortgen", "L_sekli", "T_sekli"])
-
-        # Çatı tipi
-        cati_tipi   = self.secim(["flat", "pitched", "hip"])
-        cati_egimi  = self.rastgele(20.0, 45.0)    # Derece cinsinden
-        sacak_uzu   = 0.5                           # Saçak çıkıntısı (metre)
-
-        # Pencere parametreleri
-        pencere_oran = self.rastgele(0.15, 0.45)   # Duvar alanının %15-45'i pencere
-
-        # Kapı parametreleri
-        kapi_gen    = 1.0                           # Kapı genişliği (metre)
-        kapi_yuk    = 2.1                           # Kapı yüksekliği (metre)
-
-        # --- Mesh ve Etiket Listelerini Hazırla ---
-        birlesik_mesh = rg.Mesh()  # Tüm parçaları bu mesh'e ekleyeceğiz
-        etiketler     = []         # Her yüzeyin sınıf kodu buraya
-
-        # --- Bina Gövdesini Çiz ---
-        # Plan tipine göre farklı footprint (taban izi) kullan
-        if plan_tipi == "dikdortgen":
-            kitleler = self._dikdortgen_kitle(genislik, derinlik)
-        elif plan_tipi == "L_sekli":
-            kitleler = self._L_kitle(genislik, derinlik)
-        else:  # T_sekli
-            kitleler = self._T_kitle(genislik, derinlik)
-
-        # Her kitle için kat kat duvar, döşeme, tavan ekle
-        for (kx0, ky0, kx1, ky1) in kitleler:
-            self._govde_ekle(
-                birlesik_mesh, etiketler,
-                kx0, ky0, kx1, ky1,
-                toplam_h, kat_sayisi, kat_h,
-                pencere_oran, kapi_gen, kapi_yuk
-            )
-
-        # --- Çatıyı Çiz ---
-        # Tüm kitlerin toplam bounding box'ı üzerine çatı çiz
-        tum_x0 = min(k[0] for k in kitleler)
-        tum_y0 = min(k[1] for k in kitleler)
-        tum_x1 = max(k[2] for k in kitleler)
-        tum_y1 = max(k[3] for k in kitleler)
-
-        if cati_tipi == "flat":
-            self._duz_cati_ekle(
-                birlesik_mesh, etiketler,
-                tum_x0, tum_y0, tum_x1, tum_y1, toplam_h, sacak_uzu
-            )
-        elif cati_tipi == "pitched":
-            self._besik_cati_ekle(
-                birlesik_mesh, etiketler,
-                tum_x0, tum_y0, tum_x1, tum_y1, toplam_h, cati_egimi, sacak_uzu
-            )
-        else:  # hip
-            self._kirma_cati_ekle(
-                birlesik_mesh, etiketler,
-                tum_x0, tum_y0, tum_x1, tum_y1, toplam_h, cati_egimi, sacak_uzu
-            )
-
-        # Normalleri hesapla (ışık ve görüntüleme için gerekli)
-        birlesik_mesh.Normals.ComputeNormals()
-        birlesik_mesh.Compact()
-
-        # Modelin tüm parametrelerini kayıt için topla
-        bilgi = {
-            "model_id":      model_id,
-            "plan_tipi":     plan_tipi,
-            "cati_tipi":     cati_tipi,
-            "genislik":      round(genislik, 3),
-            "derinlik":      round(derinlik, 3),
-            "kat_sayisi":    kat_sayisi,
-            "kat_yuksekligi": kat_h,
-            "toplam_yukseklik": round(toplam_h, 3),
-            "pencere_orani": round(pencere_oran, 3),
-            "cati_egimi_derece": round(cati_egimi, 1),
-            "sacak_uzunlugu": sacak_uzu,
-            "yuzey_sayisi":  birlesik_mesh.Faces.Count,
-            "etiket_listesi": etiketler,
-            "sinif_aciklamasi": {
-                "0": "wall",    "1": "floor", "2": "ceiling",
-                "3": "door",    "4": "window","5": "roof", "6": "eave"
-            }
-        }
-
-        return birlesik_mesh, etiketler, bilgi
-
-    # -------------------------------------------------------------------------
-    # PLAN TİPLERİ
-    # Her fonksiyon (x0,y0,x1,y1) tuple listesi döndürür.
-    # Her tuple = bir dikdörtgen blok/kitle tanımlar.
-    # -------------------------------------------------------------------------
-
-    def _dikdortgen_kitle(self, genislik, derinlik):
-        """Tek dikdörtgen plan - en basit bina tipi."""
-        return [(0.0, 0.0, genislik, derinlik)]
-
-    def _L_kitle(self, genislik, derinlik):
-        """
-        L şeklinde plan - iki bloktan oluşur.
-
-        [BLOK1]
-        [BLOK1][BLOK2]
-
-        """
-        # Birinci blok: tam yükseklik, yarım genişlik
-        b1x1 = genislik * 0.6   # Birinci bloğun x uzunluğu
-        b1y1 = derinlik         # Birinci bloğun y uzunluğu
-
-        # İkinci blok: yarım yükseklik
-        b2x0 = 0.0
-        b2x1 = genislik
-        b2y0 = 0.0
-        b2y1 = derinlik * 0.6
-
-        return [
-            (0.0,  0.0,  b1x1, b1y1),   # Dikey kol
-            (b2x0, b2y0, b2x1, b2y1),   # Yatay kol
-        ]
-
-    def _T_kitle(self, genislik, derinlik):
-        """
-        T şeklinde plan - üç bloktan oluşur.
-
-           [ÜST]
-        [SOL][ORTA][SAĞ]
-
-        """
-        ort_gen = genislik * 0.4          # Orta kol genişliği
-        ort_x0  = genislik * 0.3          # Orta kolun başlangıcı
-
-        return [
-            (0.0,   0.0,           genislik,          derinlik * 0.5),   # Yatay bar
-            (ort_x0, derinlik*0.5, ort_x0 + ort_gen,  derinlik),         # Dikey kol
-        ]
-
-    # -------------------------------------------------------------------------
-    # GOVDE: Duvarlar, Pencereler, Kapılar, Döşemeler
-    # -------------------------------------------------------------------------
-
-    def _govde_ekle(self, mesh, etiketler,
-                    x0, y0, x1, y1,
-                    toplam_h, kat_sayisi, kat_h,
-                    pencere_oran, kapi_gen, kapi_yuk):
-        """
-        Bir dikdörtgen kitleye kat kat bina elemanları ekler.
-
-        x0,y0,x1,y1: Planın köşe koordinatları
-        toplam_h:     Binanın toplam yüksekliği
-        kat_sayisi:   Kat sayısı
-        kat_h:        Tek kat yüksekliği
-        pencere_oran: Pencere/duvar alan oranı
-        kapi_gen/yuk: Kapı boyutları
-        """
-        genislik = x1 - x0
-        derinlik = y1 - y0
-
-        # 4 dış duvar yüzeyinin tanımı: başlangıç noktası + yön vektörü + uzunluk
-        # (baslangic_x, baslangic_y, bitis_x, bitis_y, normal_yonu)
-        duvarlar = [
-            (x0, y0, x1, y0, "gney"),   # Güney duvarı (ön cephe)
-            (x1, y0, x1, y1, "dogu"),   # Doğu duvarı
-            (x1, y1, x0, y1, "kzey"),   # Kuzey duvarı (arka cephe)
-            (x0, y1, x0, y0, "bati"),   # Batı duvarı
-        ]
-
-        # Hangi duvarda kapı olacak? (Sadece güney/ön cephede)
-        kapi_duvar = "gney"
-
-        for (dx0, dy0, dx1, dy1, yon) in duvarlar:
-            duvar_uzunlugu = math.sqrt((dx1-dx0)**2 + (dy1-dy0)**2)
-
-            # --- DÖŞEMELER ve TAVANLAR (kat aralarına) ---
-            for kat in range(kat_sayisi):
-                z_alt = kat * kat_h
-                z_ust = (kat + 1) * kat_h
-
-                # Sadece ilk duvar döngüsünde döşeme/tavan ekle (tekrar etmesin)
-                if yon == "gney":
-                    # Döşeme: köşe sırası CCW (yukarıdan bakınca) → normal YUKARI
-                    mesh_e_quad_ekle(mesh,
-                        p3d(x0, y0, z_alt), p3d(x1, y0, z_alt),
-                        p3d(x1, y1, z_alt), p3d(x0, y1, z_alt)
-                    )
-                    etiketler.append(SINIF["floor"])
-
-                    # Tavan: TÜM KATLARDA ekle (tek katlı dahil)
-                    # Köşe sırası TERS (CW yukarıdan) → normal AŞAĞI (odanın içine)
-                    # 2cm içeride: üst kattaki döşemeden geometrik olarak ayrışır
-                    z_tavan_yuz = z_ust - 0.02
-                    mesh_e_quad_ekle(mesh,
-                        p3d(x0, y1, z_tavan_yuz), p3d(x1, y1, z_tavan_yuz),
-                        p3d(x1, y0, z_tavan_yuz), p3d(x0, y0, z_tavan_yuz)
-                    )
-                    etiketler.append(SINIF["ceiling"])
-
-            # --- KAT KAT DUVARLARI ÇIZDIR ---
-            for kat in range(kat_sayisi):
-                z_alt = kat * kat_h
-                z_ust = (kat + 1) * kat_h
-
-                # Bu katta pencere var mı ve nerede?
-                pencere_sayisi = max(1, int(pencere_oran * duvar_uzunlugu))
-
-                # Duvarı parçalara böl: boşluksuz duvar panelleri
-                # Bölme mantığı: duvar uzunluğunu eşit parçalara böl
-                # Her parçada ya pencere ya düz duvar olsun
-                self._duvar_parcalari_ekle(
-                    mesh, etiketler,
-                    dx0, dy0, dx1, dy1,
-                    z_alt, z_ust,
-                    duvar_uzunlugu, pencere_sayisi,
-                    kapi_gen, kapi_yuk,
-                    kat, yon == kapi_duvar
-                )
-
-    def _duvar_parcalari_ekle(self, mesh, etiketler,
-                               dx0, dy0, dx1, dy1,
-                               z_alt, z_ust,
-                               duvar_uzunlugu, pencere_sayisi,
-                               kapi_gen, kapi_yuk,
-                               kat_no, kapi_var_mi):
-        """
-        Bir duvar yüzeyini pencereli/kapılı bölümlere ayırır ve ekler.
-
-        Duvar bölünme mantığı (soldan sağa):
-        |boşluk|Pencere|boşluk|Pencere|boşluk|
-
-        dx0,dy0 → dx1,dy1 : Duvarın başlangıç ve bitiş yatay koordinatları
-        z_alt, z_ust       : Kat yükseklikleri
-        pencere_sayisi     : Bu katta kaç pencere olacak
-        kapi_var_mi        : Zemin katta ön cephede kapı eklenecek mi
-        """
-        kat_yuk = z_ust - z_alt
-
-        # Yatay birim vektör (duvar boyunca)
-        dx = dx1 - dx0
-        dy = dy1 - dy0
-        uzunluk = math.sqrt(dx*dx + dy*dy)
-        if uzunluk < 0.001:
-            return  # Sıfır uzunluklu duvar, atla
-        ux = dx / uzunluk  # x birim vektörü
-        uy = dy / uzunluk  # y birim vektörü
-
-        # Pencere boyutları
-        pen_gen = 1.2    # Pencere genişliği (metre)
-        pen_yuk = 1.2    # Pencere yüksekliği (metre)
-        pen_alt = z_alt + 0.9   # Pencere deniz seviyesinden yüksekliği
-        pen_ust = pen_alt + pen_yuk
-
-        # Sığmıyorsa pencere ekleme
-        if pen_ust > z_ust - 0.1:
-            pen_sayisi = 0
-        else:
-            pen_sayisi = pencere_sayisi
-
-        # Kapı sadece zemin katta ve ön cephede
-        kapi_bu_katta = (kapi_var_mi and kat_no == 0)
-
-        # Duvarı segmentlere böl
-        # Kapı için merkeze yakın konum ayarla
-        segmentler = []  # (baslangic_t, bitis_t, tip) → t: 0..1 arası konum
-
-        if kapi_bu_katta and uzunluk >= (kapi_gen + 1.0):
-            # Kapıyı ortaya koy
-            kapi_baslangic = (uzunluk - kapi_gen) / 2.0
-            kapi_bitis     = kapi_baslangic + kapi_gen
-
-            # Kapı öncesi duvar
-            segmentler.append((0.0, kapi_baslangic, "wall"))
-            # Kapı
-            segmentler.append((kapi_baslangic, kapi_bitis, "door"))
-            # Kapı sonrası duvar
-            segmentler.append((kapi_bitis, uzunluk, "wall"))
-        else:
-            segmentler.append((0.0, uzunluk, "wall"))
-
-        # Şimdi her segmenti çiz
-        for (seg_bas, seg_bit, seg_tip) in segmentler:
-            seg_uzunluk = seg_bit - seg_bas
-
-            if seg_tip == "door":
-                # Kapı bölümü: 3 parça (sol duvar şeridi, kapı boşluğu, sağ duvar şeridi)
-                # Kapının üstü: kapi_yuk'tan z_ust'a
-                kapi_alt_z = z_alt
-                kapi_ust_z = z_alt + kapi_yuk
-
-                # Kapının kendisi (çerçeveli boşluk yerine renkli mesh)
-                p0 = p3d(dx0 + ux*seg_bas,  dy0 + uy*seg_bas,  kapi_alt_z)
-                p1 = p3d(dx0 + ux*seg_bit,  dy0 + uy*seg_bit,  kapi_alt_z)
-                p2 = p3d(dx0 + ux*seg_bit,  dy0 + uy*seg_bit,  kapi_ust_z)
-                p3_ = p3d(dx0 + ux*seg_bas, dy0 + uy*seg_bas,  kapi_ust_z)
-                mesh_e_quad_ekle(mesh, p0, p1, p2, p3_)
-                etiketler.append(SINIF["door"])
-
-                # Kapı üstü duvar şeridi
-                if kapi_ust_z < z_ust:
-                    p0 = p3d(dx0 + ux*seg_bas, dy0 + uy*seg_bas, kapi_ust_z)
-                    p1 = p3d(dx0 + ux*seg_bit, dy0 + uy*seg_bit, kapi_ust_z)
-                    p2 = p3d(dx0 + ux*seg_bit, dy0 + uy*seg_bit, z_ust)
-                    p3_ = p3d(dx0 + ux*seg_bas, dy0 + uy*seg_bas, z_ust)
-                    mesh_e_quad_ekle(mesh, p0, p1, p2, p3_)
-                    etiketler.append(SINIF["wall"])
-
-            elif seg_tip == "wall" and pen_sayisi > 0 and seg_uzunluk >= (pen_gen + 0.5):
-                # Duvar bölümüne pencere(ler) ekle
-                # Pencereleri eşit aralıklarla dağıt
-                aralik = seg_uzunluk / pen_sayisi
-
-                for p_i in range(pen_sayisi):
-                    # Bu pencerenin yatay konumu (segment içinde)
-                    p_merkez = seg_bas + aralik * p_i + aralik * 0.5
-                    p_sol    = p_merkez - pen_gen / 2.0
-                    p_sag    = p_merkez + pen_gen / 2.0
-
-                    # Sınır kontrolü
-                    if p_sol < seg_bas + 0.2 or p_sag > seg_bit - 0.2:
-                        continue  # Sığmıyor, atla
-
-                    # --- Sol duvar şeridi ---
-                    if p_sol > seg_bas:
-                        p0 = p3d(dx0 + ux*seg_bas, dy0 + uy*seg_bas, z_alt)
-                        p1 = p3d(dx0 + ux*p_sol,   dy0 + uy*p_sol,   z_alt)
-                        p2 = p3d(dx0 + ux*p_sol,   dy0 + uy*p_sol,   z_ust)
-                        p3_ = p3d(dx0 + ux*seg_bas, dy0 + uy*seg_bas, z_ust)
-                        mesh_e_quad_ekle(mesh, p0, p1, p2, p3_)
-                        etiketler.append(SINIF["wall"])
-
-                    # --- Pencere altı duvar şeridi ---
-                    if pen_alt > z_alt:
-                        p0 = p3d(dx0 + ux*p_sol, dy0 + uy*p_sol, z_alt)
-                        p1 = p3d(dx0 + ux*p_sag, dy0 + uy*p_sag, z_alt)
-                        p2 = p3d(dx0 + ux*p_sag, dy0 + uy*p_sag, pen_alt)
-                        p3_ = p3d(dx0 + ux*p_sol, dy0 + uy*p_sol, pen_alt)
-                        mesh_e_quad_ekle(mesh, p0, p1, p2, p3_)
-                        etiketler.append(SINIF["wall"])
-
-                    # --- Pencere ---
-                    p0 = p3d(dx0 + ux*p_sol, dy0 + uy*p_sol, pen_alt)
-                    p1 = p3d(dx0 + ux*p_sag, dy0 + uy*p_sag, pen_alt)
-                    p2 = p3d(dx0 + ux*p_sag, dy0 + uy*p_sag, pen_ust)
-                    p3_ = p3d(dx0 + ux*p_sol, dy0 + uy*p_sol, pen_ust)
-                    mesh_e_quad_ekle(mesh, p0, p1, p2, p3_)
-                    etiketler.append(SINIF["window"])
-
-                    # --- Pencere üstü duvar şeridi ---
-                    if pen_ust < z_ust:
-                        p0 = p3d(dx0 + ux*p_sol, dy0 + uy*p_sol, pen_ust)
-                        p1 = p3d(dx0 + ux*p_sag, dy0 + uy*p_sag, pen_ust)
-                        p2 = p3d(dx0 + ux*p_sag, dy0 + uy*p_sag, z_ust)
-                        p3_ = p3d(dx0 + ux*p_sol, dy0 + uy*p_sol, z_ust)
-                        mesh_e_quad_ekle(mesh, p0, p1, p2, p3_)
-                        etiketler.append(SINIF["wall"])
-
-                    # --- Sağ duvar şeridi (son pencereden sonra) ---
-                    if p_i == pen_sayisi - 1 and p_sag < seg_bit:
-                        p0 = p3d(dx0 + ux*p_sag,  dy0 + uy*p_sag,  z_alt)
-                        p1 = p3d(dx0 + ux*seg_bit, dy0 + uy*seg_bit, z_alt)
-                        p2 = p3d(dx0 + ux*seg_bit, dy0 + uy*seg_bit, z_ust)
-                        p3_ = p3d(dx0 + ux*p_sag,  dy0 + uy*p_sag,  z_ust)
-                        mesh_e_quad_ekle(mesh, p0, p1, p2, p3_)
-                        etiketler.append(SINIF["wall"])
-
-            else:
-                # Pencere yok, düz duvar
-                p0 = p3d(dx0 + ux*seg_bas, dy0 + uy*seg_bas, z_alt)
-                p1 = p3d(dx0 + ux*seg_bit, dy0 + uy*seg_bit, z_alt)
-                p2 = p3d(dx0 + ux*seg_bit, dy0 + uy*seg_bit, z_ust)
-                p3_ = p3d(dx0 + ux*seg_bas, dy0 + uy*seg_bas, z_ust)
-                mesh_e_quad_ekle(mesh, p0, p1, p2, p3_)
-                etiketler.append(SINIF["wall"])
-
-    # -------------------------------------------------------------------------
-    # ÇATI TİPLERİ
-    # -------------------------------------------------------------------------
-
-    def _duz_cati_ekle(self, mesh, etiketler,
-                        x0, y0, x1, y1, z_tavan, sacak):
-        """
-        Düz çatı ekler. Modern binalar için.
-
-        Sadece tek bir yatay yüzey. Saçak çıkıntısı dışarı taşar.
-
-             ___________
-            |  ÇATI    |   ← Saçak çıkıntısı (sacak kadar dışa taşmış)
-        [   BINA   ]
-        """
-        # Saçak çıkıntısı eklenmiş koordinatlar
-        rx0 = x0 - sacak
-        ry0 = y0 - sacak
-        rx1 = x1 + sacak
-        ry1 = y1 + sacak
-
-        # Düz çatı yüzeyi
-        mesh_e_quad_ekle(mesh,
-            p3d(rx0, ry0, z_tavan),
-            p3d(rx1, ry0, z_tavan),
-            p3d(rx1, ry1, z_tavan),
-            p3d(rx0, ry1, z_tavan)
-        )
-        etiketler.append(SINIF["roof"])
-
-        # Saçak yüzeyleri (4 kenarda aşağıya sarkma)
-        sacak_alt = z_tavan - 0.2   # Saçak kalınlığı
-
-        # Ön saçak
-        mesh_e_quad_ekle(mesh,
-            p3d(rx0, ry0, sacak_alt), p3d(rx1, ry0, sacak_alt),
-            p3d(rx1, ry0, z_tavan),   p3d(rx0, ry0, z_tavan)
-        )
-        etiketler.append(SINIF["eave"])
-
-        # Arka saçak
-        mesh_e_quad_ekle(mesh,
-            p3d(rx0, ry1, z_tavan), p3d(rx1, ry1, z_tavan),
-            p3d(rx1, ry1, sacak_alt), p3d(rx0, ry1, sacak_alt)
-        )
-        etiketler.append(SINIF["eave"])
-
-        # Sağ saçak
-        mesh_e_quad_ekle(mesh,
-            p3d(rx1, ry0, sacak_alt), p3d(rx1, ry1, sacak_alt),
-            p3d(rx1, ry1, z_tavan),   p3d(rx1, ry0, z_tavan)
-        )
-        etiketler.append(SINIF["eave"])
-
-        # Sol saçak
-        mesh_e_quad_ekle(mesh,
-            p3d(rx0, ry0, z_tavan), p3d(rx0, ry1, z_tavan),
-            p3d(rx0, ry1, sacak_alt), p3d(rx0, ry0, sacak_alt)
-        )
-        etiketler.append(SINIF["eave"])
-
-    def _besik_cati_ekle(self, mesh, etiketler,
-                          x0, y0, x1, y1, z_tavan, egim_derece, sacak):
-        """
-        Beşik çatı (pitched/gable roof) ekler.
-
-        Geleneksel çatı tipi - iki eğimli yüzey + iki alın üçgeni.
-        Çatı mahyası (ridge) ortada uzanır.
-
-              /\\         ← Mahya (tepe çizgisi)
-             /  \\
-            /    \\
-           / ÇATI \\
-          /________\\
-          [  BİNA  ]
-        """
-        # Saçak ile genişletilmiş koordinatlar
-        rx0 = x0 - sacak
-        ry0 = y0 - sacak
-        rx1 = x1 + sacak
-        ry1 = y1 + sacak
-
-        gen = rx1 - rx0   # Genişlik (X yönü)
-        dep = ry1 - ry0   # Derinlik (Y yönü)
-
-        # Çatı yüksekliği: eğim açısından hesapla
-        # tan(egim) = yükseklik / (yarı derinlik)
-        egim_rad   = math.radians(egim_derece)
-        cati_yukse = math.tan(egim_rad) * (dep / 2.0)
-
-        # Mahya yüksekliği (zeminden)
-        z_mahya = z_tavan + cati_yukse
-
-        # Mahya çizgisi orta Y'de, tüm X boyunca uzanır
-        mahya_y = (ry0 + ry1) / 2.0
-
-        # Ön çatı yüzeyi (güney tarafa bakan eğimli yüzey)
-        mesh_e_quad_ekle(mesh,
-            p3d(rx0, ry0, z_tavan),   # Sol-ön-alt
-            p3d(rx1, ry0, z_tavan),   # Sağ-ön-alt
-            p3d(rx1, mahya_y, z_mahya), # Sağ-mahya
-            p3d(rx0, mahya_y, z_mahya)  # Sol-mahya
-        )
-        etiketler.append(SINIF["roof"])
-
-        # Arka çatı yüzeyi (kuzey tarafa bakan eğimli yüzey)
-        mesh_e_quad_ekle(mesh,
-            p3d(rx0, mahya_y, z_mahya),  # Sol-mahya
-            p3d(rx1, mahya_y, z_mahya),  # Sağ-mahya
-            p3d(rx1, ry1, z_tavan),      # Sağ-arka-alt
-            p3d(rx0, ry1, z_tavan)       # Sol-arka-alt
-        )
-        etiketler.append(SINIF["roof"])
-
-        # Sol alın üçgeni (bati alın)
-        mesh_e_tri_ekle(mesh,
-            p3d(rx0, ry0, z_tavan),
-            p3d(rx0, ry1, z_tavan),
-            p3d(rx0, mahya_y, z_mahya)
-        )
-        etiketler.append(SINIF["roof"])
-
-        # Sağ alın üçgeni (dogu alın)
-        mesh_e_tri_ekle(mesh,
-            p3d(rx1, ry0, z_tavan),
-            p3d(rx1, mahya_y, z_mahya),
-            p3d(rx1, ry1, z_tavan)
-        )
-        etiketler.append(SINIF["roof"])
-
-        # Saçak yüzeyleri (ön ve arka kenarlarda)
-        sacak_alt = z_tavan - 0.2
-
-        # Ön saçak
-        mesh_e_quad_ekle(mesh,
-            p3d(rx0, ry0, sacak_alt), p3d(rx1, ry0, sacak_alt),
-            p3d(rx1, ry0, z_tavan),   p3d(rx0, ry0, z_tavan)
-        )
-        etiketler.append(SINIF["eave"])
-
-        # Arka saçak
-        mesh_e_quad_ekle(mesh,
-            p3d(rx0, ry1, z_tavan), p3d(rx1, ry1, z_tavan),
-            p3d(rx1, ry1, sacak_alt), p3d(rx0, ry1, sacak_alt)
-        )
-        etiketler.append(SINIF["eave"])
-
-    def _kirma_cati_ekle(self, mesh, etiketler,
-                          x0, y0, x1, y1, z_tavan, egim_derece, sacak):
-        """
-        Kırma çatı (hip roof) ekler.
-
-        Dört tarafta da eğimli yüzey var, alın üçgeni yok.
-        Geleneksel Türk evlerinde sık görülen çatı tipi.
-
-               /\\
-              /  \\
-             / /\\ \\
-            / /  \\ \\
-           /_/ ÇATI \\_\\
-        """
-        rx0 = x0 - sacak
-        ry0 = y0 - sacak
-        rx1 = x1 + sacak
-        ry1 = y1 + sacak
-
-        gen = rx1 - rx0
-        dep = ry1 - ry0
-
-        # Kırma çatıda hem X hem Y tarafından eğim var
-        # Küçük boyut çatı yüksekliğini belirler
-        min_boyut    = min(gen, dep)
-        egim_rad     = math.radians(egim_derece)
-        cati_yukse   = math.tan(egim_rad) * (min_boyut / 2.0)
-
-        z_mahya      = z_tavan + cati_yukse
-
-        merkez_x     = (rx0 + rx1) / 2.0
-        merkez_y     = (ry0 + ry1) / 2.0
-
-        # Kırma çatı: 4 üçgen/dörtgen yüzey
-        # Tüm boyutlar eşit ise 4 üçgen, değilse ön/arka dörtgen, yanlar üçgen
-
-        if abs(gen - dep) < 0.5:
-            # Kare plan → 4 üçgen yüzey
-
-            # Ön (güney) üçgen
-            mesh_e_tri_ekle(mesh,
-                p3d(rx0, ry0, z_tavan),
-                p3d(rx1, ry0, z_tavan),
-                p3d(merkez_x, merkez_y, z_mahya)
-            )
-            etiketler.append(SINIF["roof"])
-
-            # Arka (kuzey) üçgen
-            mesh_e_tri_ekle(mesh,
-                p3d(rx1, ry1, z_tavan),
-                p3d(rx0, ry1, z_tavan),
-                p3d(merkez_x, merkez_y, z_mahya)
-            )
-            etiketler.append(SINIF["roof"])
-
-            # Sağ (doğu) üçgen
-            mesh_e_tri_ekle(mesh,
-                p3d(rx1, ry0, z_tavan),
-                p3d(rx1, ry1, z_tavan),
-                p3d(merkez_x, merkez_y, z_mahya)
-            )
-            etiketler.append(SINIF["roof"])
-
-            # Sol (batı) üçgen
-            mesh_e_tri_ekle(mesh,
-                p3d(rx0, ry1, z_tavan),
-                p3d(rx0, ry0, z_tavan),
-                p3d(merkez_x, merkez_y, z_mahya)
-            )
-            etiketler.append(SINIF["roof"])
-
-        else:
-            # Dikdörtgen plan → uzun kenarlar dörtgen, kısa kenarlar üçgen
-
-            if gen > dep:
-                # Yatay (X) boyut büyük → mahya X boyunca uzanır
-                mahya_x0 = rx0 + (dep / 2.0)
-                mahya_x1 = rx1 - (dep / 2.0)
-
-                # Ön dörtgen
-                mesh_e_quad_ekle(mesh,
-                    p3d(rx0,    ry0, z_tavan),
-                    p3d(rx1,    ry0, z_tavan),
-                    p3d(mahya_x1, merkez_y, z_mahya),
-                    p3d(mahya_x0, merkez_y, z_mahya)
-                )
-                etiketler.append(SINIF["roof"])
-
-                # Arka dörtgen
-                mesh_e_quad_ekle(mesh,
-                    p3d(mahya_x0, merkez_y, z_mahya),
-                    p3d(mahya_x1, merkez_y, z_mahya),
-                    p3d(rx1, ry1, z_tavan),
-                    p3d(rx0, ry1, z_tavan)
-                )
-                etiketler.append(SINIF["roof"])
-
-                # Sol üçgen
-                mesh_e_tri_ekle(mesh,
-                    p3d(rx0, ry0, z_tavan),
-                    p3d(mahya_x0, merkez_y, z_mahya),
-                    p3d(rx0, ry1, z_tavan)
-                )
-                etiketler.append(SINIF["roof"])
-
-                # Sağ üçgen
-                mesh_e_tri_ekle(mesh,
-                    p3d(rx1, ry0, z_tavan),
-                    p3d(rx1, ry1, z_tavan),
-                    p3d(mahya_x1, merkez_y, z_mahya)
-                )
-                etiketler.append(SINIF["roof"])
-
-            else:
-                # Dikey (Y) boyut büyük
-                mahya_y0 = ry0 + (gen / 2.0)
-                mahya_y1 = ry1 - (gen / 2.0)
-
-                # Sol dörtgen
-                mesh_e_quad_ekle(mesh,
-                    p3d(rx0, ry0, z_tavan),
-                    p3d(merkez_x, mahya_y0, z_mahya),
-                    p3d(merkez_x, mahya_y1, z_mahya),
-                    p3d(rx0, ry1, z_tavan)
-                )
-                etiketler.append(SINIF["roof"])
-
-                # Sağ dörtgen
-                mesh_e_quad_ekle(mesh,
-                    p3d(merkez_x, mahya_y0, z_mahya),
-                    p3d(rx1, ry0, z_tavan),
-                    p3d(rx1, ry1, z_tavan),
-                    p3d(merkez_x, mahya_y1, z_mahya)
-                )
-                etiketler.append(SINIF["roof"])
-
-                # Ön üçgen
-                mesh_e_tri_ekle(mesh,
-                    p3d(rx0, ry0, z_tavan),
-                    p3d(rx1, ry0, z_tavan),
-                    p3d(merkez_x, mahya_y0, z_mahya)
-                )
-                etiketler.append(SINIF["roof"])
-
-                # Arka üçgen
-                mesh_e_tri_ekle(mesh,
-                    p3d(rx0, ry1, z_tavan),
-                    p3d(merkez_x, mahya_y1, z_mahya),
-                    p3d(rx1, ry1, z_tavan)
-                )
-                etiketler.append(SINIF["roof"])
-
-        # Saçak yüzeyleri (4 kenar)
-        sacak_alt = z_tavan - 0.2
-
-        for (sx0, sy0, sx1, sy1) in [
-            (rx0, ry0, rx1, ry0),   # Ön
-            (rx0, ry1, rx1, ry1),   # Arka
-            (rx1, ry0, rx1, ry1),   # Sağ
-            (rx0, ry0, rx0, ry1),   # Sol
-        ]:
-            mesh_e_quad_ekle(mesh,
-                p3d(sx0, sy0, sacak_alt), p3d(sx1, sy1, sacak_alt),
-                p3d(sx1, sy1, z_tavan),   p3d(sx0, sy0, z_tavan)
-            )
-            etiketler.append(SINIF["eave"])
-
-# =============================================================================
-# ANA ÇALIŞTIRMA BLOĞU
-# Grasshopper bu bloğu "Run" butonuna basınca çalıştırır.
-# =============================================================================
-
-def ana_uretim():
-    """
-    500 bina modeli üretir ve kaydeder.
-    Her 50 modelde bir ilerleme mesajı yazdırır.
-    """
-
-    # Çıktı klasörlerini oluştur (yoksa)
-    for klasor in [OBJ_KLASORU, JSON_KLASORU]:
-        if not os.path.exists(klasor):
-            os.makedirs(klasor)
-            print("Klasor olusturuldu: {}".format(klasor))
-
-    uretici = BinaUretici(TOHUM)
-
-    basarili = 0
-    hatali   = 0
-
-    print("=" * 60)
-    print("  BINA MODELI URETIMI BASLIYOR")
-    print("  Toplam: {} model".format(MODEL_SAYISI))
-    print("  Cikti:  {}".format(OBJ_KLASORU))
-    print("=" * 60)
-
-    for i in range(MODEL_SAYISI):
-        try:
-            # Bina üret
-            mesh, etiketler, bilgi = uretici.bina_uret(i)
-
-            # Dosya adları
-            obj_dosya  = os.path.join(OBJ_KLASORU,  "bina_{:04d}.obj".format(i))
-            json_dosya = os.path.join(JSON_KLASORU, "bina_{:04d}.json".format(i))
-
-            # Kaydet
-            obj_olarak_kaydet(mesh, obj_dosya)
-            json_olarak_kaydet(bilgi, json_dosya)
-
-            basarili += 1
-
-            # Her 50 modelde ilerleme göster
-            if (i + 1) % 50 == 0:
-                print("  [{}/{}] {} model uretildi...".format(
-                    i+1, MODEL_SAYISI, basarili))
-
-        except Exception as e:
-            hatali += 1
-            print("  HATA - Model {}: {}".format(i, str(e)))
-
-    print()
-    print("=" * 60)
-    print("  URETIM TAMAMLANDI!")
-    print("  Basarili: {}".format(basarili))
-    print("  Hatali:   {}".format(hatali))
-    print("  OBJ:  {}".format(OBJ_KLASORU))
-    print("  JSON: {}".format(JSON_KLASORU))
-    print("=" * 60)
-
-    return basarili
-
-
-# =============================================================================
-# GRASSHOPPER ÇIKTI BLOĞU
-# =============================================================================
-#
-# Ekstra bileşen gerekmez — GHPython'da 'a' çıktısı viewport'ta otomatik görünür.
-#
-# İSTEĞE BAĞLI: Number Slider bağlamak için
-#   Bileşene sağ tık → ZUI → "model_no" girişi ekle → Slider bağla (0-499)
-#
-# Renk kodları:
-#   Gri        = duvar (wall)
-#   Kahve      = döşeme (floor)
-#   Açık mavi  = tavan (ceiling)
-#   Koyu kahve = kapı (door)
-#   Mavi       = pencere (window)
-#   Kırmızı    = çatı (roof)
-#   Turuncu    = saçak (eave)
-# =============================================================================
-
-SINIF_RENKLERI = {
-    0: (180, 180, 180),   # wall    → gri
-    1: (160, 120,  80),   # floor   → kahve
-    2: (180, 220, 255),   # ceiling → açık mavi  (floor'dan ayırt etmek için)
-    3: ( 80,  50,  20),   # door    → koyu kahve
-    4: ( 60, 140, 220),   # window  → mavi
-    5: (200,  60,  60),   # roof    → kırmızı
-    6: (200, 130,  50),   # eave    → turuncu
+            obj_satirlar.append("f {} {} {} {}".format(f.A+vo+1, f.B+vo+1, f.C+vo+1, f.D+vo+1))
+    vo += m.Vertices.Count
+
+with open(obj_yolu, "w") as f:
+    f.write("\n".join(obj_satirlar))
+
+params = {
+    "bina_id": bina_id,
+    "genislik": x, "derinlik": y, "yukseklik": z, "katlar": katlar,
+    "kapi_cephe": kapi_cephe, "kapi_offset": kapi_offset,
+    "kapi_genislik": u, "kapi_yukseklik": v_kapi,
+    "pencere_cepheler": pen_cepheler,
+    "pencere_genislik": pen_g, "pencere_yukseklik": pen_y,
+    "pencere_deniz_seviyesi": pen_deniz,
+    "cati_yukseklik": cati_yukseklik,
+    "sacak_genislik": sacak_g, "sacak_cepheler": sacak_cepheler,
+    "sinif_aciklamasi": {
+        "0": "wall", "1": "floor", "2": "ceiling",
+        "3": "door", "4": "window", "5": "roof", "6": "eave"
+    }
 }
+with open(json_yolu, "w") as f:
+    json.dump(params, f, indent=2, ensure_ascii=True)
 
-def mesh_renklendir(mesh, etiketler):
-    """Her yüzeyi sınıf rengine göre boyar (Grasshopper önizleme için)."""
-    try:
-        import System.Drawing as sd
-        mesh.VertexColors.CreateMonotoneMesh(sd.Color.White)
-        for yuz_i in range(mesh.Faces.Count):
-            if yuz_i >= len(etiketler):
-                break
-            r, g, b = SINIF_RENKLERI.get(etiketler[yuz_i], (200, 200, 200))
-            renk = sd.Color.FromArgb(255, r, g, b)
-            f = mesh.Faces[yuz_i]
-            mesh.VertexColors[f.A] = renk
-            mesh.VertexColors[f.B] = renk
-            mesh.VertexColors[f.C] = renk
-            if not f.IsTriangle:
-                mesh.VertexColors[f.D] = renk
-    except:
-        pass  # System.Drawing yoksa (Colab/Python) renksiz devam et
-    return mesh
+print("Kaydedildi: bina_{:04d}  ({} eleman)".format(bina_id, len(tum)))
 
-# --- Grasshopper çıkışları ---
-# 'a' değişkeni GHPython'un varsayılan çıktısı → tel bağlamadan viewport'ta görünür
-a     = None
-rapor = ""
-
-try:
-    _id = int(model_no) if "model_no" in dir() else 0
-    _uretici = BinaUretici(_id)
-    _mesh, _etiketler, _bilgi = _uretici.bina_uret(_id)
-    a = mesh_renklendir(_mesh, _etiketler)
-
-    from collections import Counter as _C
-    _sayac = _C(_etiketler)
-    _sinif_adlari = {0:"Duvar", 1:"Doseme", 2:"Tavan", 3:"Kapi", 4:"Pencere", 5:"Cati", 6:"Sacak"}
-    _satirlar = [
-        "Model {}: {}x{} m, {} kat, {} cati".format(
-            _id,
-            round(_bilgi["genislik"], 1), round(_bilgi["derinlik"], 1),
-            _bilgi["kat_sayisi"], _bilgi["cati_tipi"]
-        ),
-        "Toplam yuzey: {}".format(_bilgi["yuzey_sayisi"]),
-        "",
-    ]
-    for _s in range(7):
-        _satirlar.append("  {}: {} yuzey".format(_sinif_adlari[_s], _sayac.get(_s, 0)))
-    rapor = "\n".join(_satirlar)
-
-except Exception as _e:
-    rapor = "Hata: " + str(_e)
-
-print(rapor)   # GHPython "out" panelinde görünür
-
-# 500 model kaydetme (kaydet_tumu = True yapınca çalışır)
-if "kaydet_tumu" in dir() and kaydet_tumu:
-    try:
-        _basarili = ana_uretim()
-        print("\n500 model kaydedildi! ({} basarili)".format(_basarili))
-    except Exception as _e:
-        print("Kaydetme hatasi: " + str(_e))
-
-# Not: Grasshopper'da __name__ == "__main__" olduğu için bu blok kasıtlı kaldırıldı.
-# 500 model üretmek için kaydet_tumu girişini True yapın.
+# =============================================================================
+# GRASSHOPPER ÇIKTI (viewport önizleme)
+# =============================================================================
+a = [b for b in tum.values() if b is not None]

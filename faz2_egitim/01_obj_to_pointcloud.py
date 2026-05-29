@@ -47,35 +47,50 @@ NOKTA_SAYISI = 2048   # Her modelden kaç nokta örneklenecek
 # YARDIMCI FONKSİYONLAR
 # =============================================================================
 
+def grup_adi_etikete_cevir(grup_adi):
+    """
+    OBJ 'g' satırındaki grup adından sınıf etiketi üretir.
+    grasshopper_generate.py'deki adlandırma kuralıyla uyumlu.
+    """
+    g = grup_adi.lower()
+    if "zemin"  in g: return 1  # floor
+    if "tavan"  in g: return 2  # ceiling
+    if "kapi"   in g: return 3  # door bölgesi
+    if "pen_"   in g: return 4  # window bölgesi
+    if "cati"   in g: return 5  # roof
+    if "sacak"  in g: return 6  # eave
+    if "duvar"  in g: return 0  # wall
+    return 0                    # varsayılan: wall
+
+
 def obj_oku(dosya_yolu):
     """
-    .obj dosyasını okur, köşe koordinatları ve yüzey listesini döndürür.
-
-    OBJ formatı:
-      v 1.0 2.0 3.0   → köşe koordinatı
-      f 1 2 3 4       → yüzey (hangi köşeler birbirine bağlı)
-                        (OBJ'de indeksler 1'den başlar!)
+    .obj dosyasını okur.
+    'g grup_adi' satırlarından her yüzeyin etiketini çıkarır.
+    Döndürür: (köşeler, yüzeyler, yüzey_etiketleri)
     """
-    köseler = []   # Her köşenin [x, y, z] koordinatları
-    yuzeyler = []  # Her yüzeyin köşe indeksleri listesi
+    koseler  = []
+    yuzeyler = []
+    yuzey_etiketleri = []
+    mevcut_etiket = 0  # varsayılan: wall
 
     with open(dosya_yolu, "r") as f:
         for satir in f:
             satir = satir.strip()
             if satir.startswith("v "):
-                # Köşe satırı: "v x y z"
                 parcalar = satir.split()
-                köseler.append([float(parcalar[1]),
-                                 float(parcalar[2]),
-                                 float(parcalar[3])])
+                koseler.append([float(parcalar[1]),
+                                float(parcalar[2]),
+                                float(parcalar[3])])
+            elif satir.startswith("g "):
+                mevcut_etiket = grup_adi_etikete_cevir(satir[2:].strip())
             elif satir.startswith("f "):
-                # Yüzey satırı: "f 1 2 3" veya "f 1 2 3 4"
                 parcalar = satir.split()[1:]
-                # OBJ indeksler 1'den başlar, Python 0'dan → 1 çıkar
                 indeksler = [int(p.split("/")[0]) - 1 for p in parcalar]
                 yuzeyler.append(indeksler)
+                yuzey_etiketleri.append(mevcut_etiket)
 
-    return np.array(köseler, dtype=np.float32), yuzeyler
+    return np.array(koseler, dtype=np.float32), yuzeyler, yuzey_etiketleri
 
 
 def ucgen_alan_ve_normal(p0, p1, p2):
@@ -96,7 +111,7 @@ def ucgen_alan_ve_normal(p0, p1, p2):
     return alan, normal
 
 
-def meshten_nokta_ornekle(köseler, yuzeyler, etiketler, n_nokta):
+def meshten_nokta_ornekle(koseler, yuzeyler, etiketler, n_nokta):
     """
     Mesh yüzeylerinden alan ağırlıklı olarak nokta örnekler.
 
@@ -136,11 +151,11 @@ def meshten_nokta_ornekle(köseler, yuzeyler, etiketler, n_nokta):
             continue  # 5+ köşeli yüzey (nadir), atla
 
         for ucgen in ucgen_ciftleri:
-            if max(ucgen) >= len(köseler):
+            if max(ucgen) >= len(koseler):
                 continue   # Bozuk indeks, atla
-            p0 = köseler[ucgen[0]]
-            p1 = köseler[ucgen[1]]
-            p2 = köseler[ucgen[2]]
+            p0 = koseler[ucgen[0]]
+            p1 = koseler[ucgen[1]]
+            p2 = koseler[ucgen[2]]
             alan, normal = ucgen_alan_ve_normal(p0, p1, p2)
             ucgen_alanlari.append(alan)
             ucgen_normalleri.append(normal)
@@ -234,16 +249,11 @@ def donustur():
         cikti_yol = os.path.join(CIKTI_KLASORU, model_adi + ".npy")
 
         try:
-            # JSON'dan etiketleri oku
-            with open(json_yol, "r", encoding="utf-8") as jf:
-                bilgi = json.load(jf)
-            etiketler = bilgi["etiket_listesi"]
-
-            # OBJ'yi oku
-            köseler, yuzeyler = obj_oku(obj_yol)
+            # OBJ'yi oku — etiketler grup adlarından gelir, JSON gerekmez
+            koseler, yuzeyler, etiketler = obj_oku(obj_yol)
 
             # Nokta bulutu üret
-            noktalar = meshten_nokta_ornekle(köseler, yuzeyler, etiketler, NOKTA_SAYISI)
+            noktalar = meshten_nokta_ornekle(koseler, yuzeyler, etiketler, NOKTA_SAYISI)
 
             # Normalize et
             noktalar = normalize_et(noktalar)

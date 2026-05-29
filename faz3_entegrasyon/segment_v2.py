@@ -378,19 +378,50 @@ def kumelele(merkezler, esik):
     return kumeler
 
 
+def cephe_ve_konum(cx, cy, cz, yuk, xmin, xmax, ymin, ymax, zmin):
+    """
+    Bir açıklığın (pencere/kapı) merkez konumundan:
+      - hangi cephede olduğunu (on/arka/sol/sag)
+      - cephe başından uzaklığını (u)
+      - alt kenarının yerden yüksekliğini (v_alt)
+    hesaplar. parametrik_kur.py açıklığı buraya yerleştirir.
+    """
+    d_on   = cy - ymin     # y=min cephesi
+    d_arka = ymax - cy     # y=max cephesi
+    d_sol  = cx - xmin     # x=min cephesi
+    d_sag  = xmax - cx     # x=max cephesi
+    en_yakin = min(d_on, d_arka, d_sol, d_sag)
+
+    if en_yakin == d_on:
+        cephe, u = "on", cx - xmin
+    elif en_yakin == d_arka:
+        cephe, u = "arka", cx - xmin
+    elif en_yakin == d_sol:
+        cephe, u = "sol", cy - ymin
+    else:
+        cephe, u = "sag", cy - ymin
+
+    v_alt = (cz - yuk / 2.0) - zmin   # alt kenar yüksekliği
+    return cephe, max(0.0, u), max(0.0, v_alt)
+
+
 def parametre_cikar(mesh, yuzey_siniflar):
     """
     Segmentlenmiş mesh'ten mimari parametreleri ölçer.
-    Döndürür: (parametre_dict, rapor_metni)
+    Döndürür: (parametre_dict, rapor_metni, recon_dict)
+      recon_dict → parametrik_kur.py'nin okuyacağı yeniden-kurma verisi (JSON'a uygun)
     """
     v = mesh.Vertices
     # Bina sınırları
     xs = [v[i].X for i in range(v.Count)]
     ys = [v[i].Y for i in range(v.Count)]
     zs = [v[i].Z for i in range(v.Count)]
-    genislik   = max(xs) - min(xs)
-    derinlik   = max(ys) - min(ys)
-    yukseklik  = max(zs) - min(zs)
+    xmin, xmax = min(xs), max(xs)
+    ymin, ymax = min(ys), max(ys)
+    zmin, zmax = min(zs), max(zs)
+    genislik   = xmax - xmin
+    derinlik   = ymax - ymin
+    yukseklik  = zmax - zmin
 
     # Sınıf bazlı yüzeyleri topla
     sinif_yuzeyler = {s: [] for s in range(7)}
@@ -442,9 +473,12 @@ def parametre_cikar(mesh, yuzey_siniflar):
 
     # Çatı tipi (çatı yüzey normallerinin z bileşeni → düz mü eğimli mi)
     cati_tipi = "yok"
+    cati_yuksekligi = 0.0
     if sinif_yuzeyler[5]:
         egimli = 0
+        cati_zler = []
         for (yi, m, a) in sinif_yuzeyler[5]:
+            cati_zler.append(m.Z)
             f = mesh.Faces[yi]
             p0 = rg.Point3d(v[f.A].X, v[f.A].Y, v[f.A].Z)
             p1 = rg.Point3d(v[f.B].X, v[f.B].Y, v[f.B].Z)
@@ -454,7 +488,50 @@ def parametre_cikar(mesh, yuzey_siniflar):
                 n.Unitize()
                 if abs(n.Z) < 0.9:   # yataydan saparsa eğimli
                     egimli += 1
-        cati_tipi = "egimli (besik/kirma)" if egimli > len(sinif_yuzeyler[5]) * 0.3 else "duz"
+        egimli_mi = egimli > len(sinif_yuzeyler[5]) * 0.3
+        cati_tipi = "egimli (besik/kirma)" if egimli_mi else "duz"
+        # Çatı yüksekliği = çatı bölgesinin z aralığı (eğimliyse)
+        if egimli_mi and cati_zler:
+            cati_yuksekligi = max(0.0, max(cati_zler) - min(cati_zler))
+
+    # Duvar yüksekliği = toplam - çatı; kat yüksekliği buradan
+    duvar_toplam_yuk = max(2.0, yukseklik - cati_yuksekligi)
+    kat_yuk = duvar_toplam_yuk / kat_sayisi
+
+    # --- Yeniden-kurma verisi (parametrik_kur.py için) ---
+    # Her açıklığın cephesi + cephe üzerindeki konumu + alt yüksekliği
+    acikliklar = []
+    for p in pencere_listesi:
+        if p["genislik"] < 0.35 or p["yukseklik"] < 0.35:
+            continue   # gürültü (0.1x0.1 gibi) — atla
+        cx, cy, cz = p["merkez"]
+        cephe, u, v_alt = cephe_ve_konum(cx, cy, cz, p["yukseklik"],
+                                         xmin, xmax, ymin, ymax, zmin)
+        acikliklar.append({
+            "tip": "pencere", "cephe": cephe,
+            "u": round(u, 2), "v_alt": round(v_alt, 2),
+            "genislik": p["genislik"], "yukseklik": p["yukseklik"]
+        })
+    for k in kapi_listesi:
+        if k["genislik"] < 0.35 or k["yukseklik"] < 0.5:
+            continue
+        cx, cy, cz = k["merkez"]
+        cephe, u, v_alt = cephe_ve_konum(cx, cy, cz, k["yukseklik"],
+                                         xmin, xmax, ymin, ymax, zmin)
+        acikliklar.append({
+            "tip": "kapi", "cephe": cephe,
+            "u": round(u, 2), "v_alt": 0.0,   # kapı zeminden başlar
+            "genislik": k["genislik"], "yukseklik": k["yukseklik"]
+        })
+
+    recon = {
+        "genislik":       round(genislik, 2),
+        "derinlik":       round(derinlik, 2),
+        "kat_sayisi":     kat_sayisi,
+        "kat_yuksekligi": round(kat_yuk, 2),
+        "cati_yukseklik": round(cati_yuksekligi, 2),
+        "acikliklar":     acikliklar,
+    }
 
     params = {
         "bina_genislik":   round(genislik, 2),
@@ -490,7 +567,7 @@ def parametre_cikar(mesh, yuzey_siniflar):
     sat.append("Doseme alani: {} m2".format(params["doseme_alani_m2"]))
     sat.append("Pencere/duvar orani: %{}".format(round(pen_duvar_orani*100, 1)))
 
-    return params, "\n".join(sat)
+    return params, "\n".join(sat), recon
 
 # =============================================================================
 # ADIM 5: MESH RENKLENDİR
@@ -582,9 +659,10 @@ def mesh_coerce(m):
         pass
     return m
 
-a           = None
-rapor       = "Mesh baglayin ve 'calistir' toggle'ini True yapin."
-parametreler = ""
+a              = None
+rapor          = "Mesh baglayin ve 'calistir' toggle'ini True yapin."
+parametreler   = ""
+parametre_json = ""    # parametrik_kur.py'ye giden makine-okur veri
 
 if "calistir" in dir() and calistir and "mesh_giris" in dir() and mesh_giris is not None:
     mesh_giris = mesh_coerce(mesh_giris)
@@ -602,8 +680,9 @@ if "calistir" in dir() and calistir and "mesh_giris" in dir() and mesh_giris is 
             sat.append("  {}: {} yuzey".format(SINIF_ADLARI[s], sayac.get(s, 0)))
         rapor = "\n".join(sat)
 
-        params, param_rapor = parametre_cikar(mesh_giris, siniflar)
-        parametreler = param_rapor
+        params, param_rapor, recon = parametre_cikar(mesh_giris, siniflar)
+        parametreler   = param_rapor
+        parametre_json = json.dumps(recon)   # → parametrik_kur'a bagla
         print(rapor)
         print()
         print(param_rapor)

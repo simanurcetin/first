@@ -8,104 +8,78 @@
 #
 # AMAÇ:
 #   segment_v2.py herhangi bir mesh'i (Meshy AI vb.) segmentleyip
-#   parametrelerini ÖLÇER. Bu bileşen o parametreleri alıp binayı
-#   DÜZENLENEBİLİR bir parametrik Brep model olarak YENİDEN KURAR.
+#   "parametre_json" çıkışında yapısal veriyi verir:
+#     - bina boyutları, kat sayısı, çatı yüksekliği
+#     - her açıklığın (pencere/kapı) CEPHESİ + KONUMU + BOYUTU
 #
-#   Böylece kapı genişliği slider'ını çevirince, pencere yüksekliğini
-#   değiştirince... model anında güncellenir. Artık "okunan" model
-#   "editlenebilir" hale gelir.
+#   Bu bileşen o JSON'u okuyup binayı DÜZENLENEBİLİR bir parametrik
+#   Brep model olarak YENİDEN KURAR — pencereler/kapılar GERÇEK
+#   yerlerinde, doğru sayıda. Yani "import ettiğin bina, ama artık
+#   editlenebilir". Slider'larla rötuş yaparsın.
 #
 # AKIŞ:
-#   Mesh → [segment_v2] → ölçülen parametreler → [SLIDER ile değiştir] →
-#   [parametrik_kur] → editlenebilir Brep bina
+#   Mesh → [segment_v2] → parametre_json → [parametrik_kur] → editlenebilir bina
+#                                              ↑ slider'lar (global rötuş)
 #
-# GRASSHOPPER BAĞLANTISI:
-#   Her parametre için bir Number Slider ekle, segment_v2'nin verdiği
-#   ölçülen değeri başlangıç olarak slider'a yaz, sonra istediğin gibi oyna.
+# GRASSHOPPER GİRİŞLERİ (hepsi opsiyonel):
+#   parametre_json   (str)  → segment_v2'nin "parametre_json" çıkışını bağla
+#   --- aşağıdakiler boşsa JSON'daki değer, o da yoksa varsayılan kullanılır ---
+#   bina_genislik    (float)
+#   bina_derinlik    (float)
+#   kat_yuksekligi   (float)
+#   kat_sayisi       (int)
+#   cati_yukseklik   (float)  → 0 = düz çatı
+#   sacak_genislik   (float)
+#   pencere_olcek    (float)  → tüm pencereleri büyüt/küçült (1.0 = aynı)
+#   kapi_olcek       (float)  → tüm kapıları büyüt/küçült
 #
-#   GİRİŞLER (hepsi opsiyonel — boş bırakılırsa varsayılan kullanılır):
-#     bina_genislik     (float)  → x ekseni
-#     bina_derinlik     (float)  → y ekseni
-#     kat_yuksekligi    (float)  → bir katın yüksekliği
-#     kat_sayisi        (int)    → kat adedi
-#     kapi_genislik     (float)
-#     kapi_yukseklik    (float)
-#     kapi_cephe        (str)    → "on" / "arka" / "sol" / "sag"
-#     kapi_offset       (float)  → kapının cephe başından mesafesi (-1 = ortala)
-#     pencere_genislik  (float)
-#     pencere_yukseklik (float)
-#     pencere_deniz     (float)  → pencere alt kenarının yerden yüksekliği
-#     pencere_cepheler  (str)    → "on,arka,sol,sag" (virgülle)
-#     cati_yukseklik    (float)  → 0 = düz çatı
-#     sacak_genislik    (float)
-#     sacak_cepheler    (str)    → "on,arka,sol,sag" (virgülle)
-#
-#   ÇIKIŞLAR:
-#     a        → Brep listesi (editlenebilir bina modeli)
-#     bilgi    → kullanılan parametrelerin özeti (Panel)
+# ÇIKIŞLAR:
+#   a       → Brep listesi (editlenebilir bina modeli)
+#   bilgi   → kullanılan parametrelerin özeti (Panel)
 # =============================================================================
 
 import Rhino.Geometry as rg
+import json
 
-# =============================================================================
-# VARSAYILAN PARAMETRELER
-# Slider bağlanmazsa / boş gelirse bunlar kullanılır.
-# =============================================================================
 
 def _vars(deger, varsayilan):
-    """Giriş None ya da boşsa varsayılanı döndürür."""
+    """Giriş None / boş ise varsayılanı döndürür."""
     try:
         if deger is None:
+            return varsayilan
+        if isinstance(deger, str) and deger.strip() == "":
             return varsayilan
         return deger
     except:
         return varsayilan
 
-x   = float(_vars(globals().get("bina_genislik"),  8.0))
-y   = float(_vars(globals().get("bina_derinlik"),  6.0))
-z   = float(_vars(globals().get("kat_yuksekligi"), 3.0))
-kat = int(  _vars(globals().get("kat_sayisi"),     1))
-t   = 0.2   # duvar kalınlığı (sabit)
-
-u       = float(_vars(globals().get("kapi_genislik"),  1.0))
-v_kapi  = float(_vars(globals().get("kapi_yukseklik"), 2.1))
-kapi_cephe  = str(_vars(globals().get("kapi_cephe"),  "on")).strip().lower()
-kapi_offset_giris = _vars(globals().get("kapi_offset"), -1.0)  # -1 = ortala
-
-pen_g    = float(_vars(globals().get("pencere_genislik"),  1.2))
-pen_y    = float(_vars(globals().get("pencere_yukseklik"), 1.0))
-pen_deniz = float(_vars(globals().get("pencere_deniz"),    0.9))
-
-cati_yukseklik = float(_vars(globals().get("cati_yukseklik"), 1.5))
-sacak_g        = float(_vars(globals().get("sacak_genislik"), 0.4))
-
-
-def _cephe_listesi(giris, varsayilan):
-    """'on,arka' veya ['on','arka'] girişini temiz listeye çevirir."""
-    if giris is None:
-        return varsayilan
-    if isinstance(giris, str):
-        parcalar = [p.strip().lower() for p in giris.replace(";", ",").split(",")]
-        return [p for p in parcalar if p in ("on", "arka", "sol", "sag")]
+# --- segment_v2'den gelen JSON'u oku ---
+_json = _vars(globals().get("parametre_json"), "")
+veri = {}
+if _json:
     try:
-        return [str(p).strip().lower() for p in giris
-                if str(p).strip().lower() in ("on", "arka", "sol", "sag")]
+        veri = json.loads(_json)
     except:
-        return varsayilan
+        veri = {}
 
-pen_cepheler   = _cephe_listesi(globals().get("pencere_cepheler"), ["on", "arka"])
-sacak_cepheler = _cephe_listesi(globals().get("sacak_cepheler"),   ["on", "arka", "sol", "sag"])
+# --- Temel parametreler: slider > JSON > varsayılan ---
+x   = float(_vars(globals().get("bina_genislik"),  veri.get("genislik",       8.0)))
+y   = float(_vars(globals().get("bina_derinlik"),  veri.get("derinlik",       6.0)))
+z   = float(_vars(globals().get("kat_yuksekligi"), veri.get("kat_yuksekligi", 3.0)))
+kat = int(  _vars(globals().get("kat_sayisi"),     veri.get("kat_sayisi",     1)))
+cati_yukseklik = float(_vars(globals().get("cati_yukseklik"), veri.get("cati_yukseklik", 1.5)))
+sacak_g    = float(_vars(globals().get("sacak_genislik"), 0.0))
+pen_olcek  = float(_vars(globals().get("pencere_olcek"), 1.0))
+kapi_olcek = float(_vars(globals().get("kapi_olcek"),    1.0))
+t = 0.2   # duvar kalınlığı
 
-# Güvenli sınırlar (negatif/çok büyük değerlere karşı)
+acikliklar = veri.get("acikliklar", [])
+
+# Güvenli sınırlar
 x = max(2.0, x); y = max(2.0, y); z = max(2.0, z); kat = max(1, kat)
-u = max(0.4, min(u, x - 0.4, y - 0.4))
-v_kapi = max(1.6, min(v_kapi, z - 0.1))
-pen_g = max(0.3, pen_g)
-pen_y = max(0.3, pen_y)
-pen_deniz = max(0.2, min(pen_deniz, z - pen_y - 0.2))
 
 # =============================================================================
-# GEOMETRİ YARDIMCILARI  (Faz 1 üreticisiyle aynı mantık)
+# GEOMETRİ YARDIMCILARI
 # =============================================================================
 
 def kutu(x0, y0, z0, x1, y1, z1):
@@ -113,157 +87,122 @@ def kutu(x0, y0, z0, x1, y1, z1):
     return rg.Box(bb).ToBrep()
 
 
-def kapi_ofset(cephe_uzunluk):
-    """Kapı offset'i: -1 ise ortalar, değilse sınırlandırır."""
-    if kapi_offset_giris is None or float(kapi_offset_giris) < 0:
-        return max(0.2, (cephe_uzunluk - u) / 2.0)
-    return max(0.2, min(float(kapi_offset_giris), cephe_uzunluk - u - 0.2))
-
-
-def pen_ofset(cephe_uzunluk):
-    """Pencereyi cephede ortalar."""
-    return max(0.2, (cephe_uzunluk - pen_g) / 2.0)
-
-
-def on_duvar(zb, zh, kapi=False, pen=False):
-    p = {}
-    if kapi:
-        ko = kapi_ofset(x)
-        p["kapi_sol"] = kutu(0,    0, zb, ko,    t, zb + zh)
-        p["kapi_sag"] = kutu(ko+u, 0, zb, x,     t, zb + zh)
-        p["kapi_ust"] = kutu(ko,   0, zb + v_kapi, ko + u, t, zb + zh)
-    elif pen:
-        po = pen_ofset(x)
-        p["pen_sol"] = kutu(0,        0, zb,                  po,       t, zb + zh)
-        p["pen_sag"] = kutu(po+pen_g, 0, zb,                  x,        t, zb + zh)
-        p["pen_alt"] = kutu(po,       0, zb,                  po+pen_g, t, zb + pen_deniz)
-        p["pen_ust"] = kutu(po,       0, zb+pen_deniz+pen_y,  po+pen_g, t, zb + zh)
-    else:
-        p["duvar"] = kutu(0, 0, zb, x, t, zb + zh)
-    return p
-
-
-def arka_duvar(zb, zh, kapi=False, pen=False):
-    p = {}
-    if kapi:
-        ko = kapi_ofset(x)
-        p["kapi_sol"] = kutu(0,    y-t, zb, ko,    y, zb + zh)
-        p["kapi_sag"] = kutu(ko+u, y-t, zb, x,     y, zb + zh)
-        p["kapi_ust"] = kutu(ko,   y-t, zb + v_kapi, ko + u, y, zb + zh)
-    elif pen:
-        po = pen_ofset(x)
-        p["pen_sol"] = kutu(0,        y-t, zb,                  po,       y, zb + zh)
-        p["pen_sag"] = kutu(po+pen_g, y-t, zb,                  x,        y, zb + zh)
-        p["pen_alt"] = kutu(po,       y-t, zb,                  po+pen_g, y, zb + pen_deniz)
-        p["pen_ust"] = kutu(po,       y-t, zb+pen_deniz+pen_y,  po+pen_g, y, zb + zh)
-    else:
-        p["duvar"] = kutu(0, y-t, zb, x, y, zb + zh)
-    return p
-
-
-def sol_duvar(zb, zh, kapi=False, pen=False):
-    p = {}
-    if kapi:
-        ko = kapi_ofset(y)
-        p["kapi_sol"] = kutu(0, 0,    zb, t, ko,    zb + zh)
-        p["kapi_sag"] = kutu(0, ko+u, zb, t, y,     zb + zh)
-        p["kapi_ust"] = kutu(0, ko,   zb + v_kapi, t, ko + u, zb + zh)
-    elif pen:
-        po = pen_ofset(y)
-        p["pen_sol"] = kutu(0, 0,        zb,                  t, po,       zb + zh)
-        p["pen_sag"] = kutu(0, po+pen_g, zb,                  t, y,        zb + zh)
-        p["pen_alt"] = kutu(0, po,       zb,                  t, po+pen_g, zb + pen_deniz)
-        p["pen_ust"] = kutu(0, po,       zb+pen_deniz+pen_y,  t, po+pen_g, zb + zh)
-    else:
-        p["duvar"] = kutu(0, 0, zb, t, y, zb + zh)
-    return p
-
-
-def sag_duvar(zb, zh, kapi=False, pen=False):
-    p = {}
-    if kapi:
-        ko = kapi_ofset(y)
-        p["kapi_sol"] = kutu(x-t, 0,    zb, x, ko,    zb + zh)
-        p["kapi_sag"] = kutu(x-t, ko+u, zb, x, y,     zb + zh)
-        p["kapi_ust"] = kutu(x-t, ko,   zb + v_kapi, x, ko + u, zb + zh)
-    elif pen:
-        po = pen_ofset(y)
-        p["pen_sol"] = kutu(x-t, 0,        zb,                  x, po,       zb + zh)
-        p["pen_sag"] = kutu(x-t, po+pen_g, zb,                  x, y,        zb + zh)
-        p["pen_alt"] = kutu(x-t, po,       zb,                  x, po+pen_g, zb + pen_deniz)
-        p["pen_ust"] = kutu(x-t, po,       zb+pen_deniz+pen_y,  x, po+pen_g, zb + zh)
-    else:
-        p["duvar"] = kutu(x-t, 0, zb, x, y, zb + zh)
-    return p
-
-
-def kat_uret(kat_no):
-    zb = kat_no * z
-    el = {}
-    el["zemin_{}".format(kat_no)] = kutu(0, 0, zb,       x, y, zb + t)
-    el["tavan_{}".format(kat_no)] = kutu(0, 0, zb+z-t,   x, y, zb + z)
-    for cephe in ["on", "arka", "sol", "sag"]:
-        has_kapi = (cephe == kapi_cephe and kat_no == 0)
-        has_pen  = (cephe in pen_cepheler)
-        prefix   = "{}_{}".format(cephe, kat_no)
-        if   cephe == "on":   p = on_duvar  (zb, z, has_kapi, has_pen and not has_kapi)
-        elif cephe == "arka": p = arka_duvar(zb, z, has_kapi, has_pen and not has_kapi)
-        elif cephe == "sol":  p = sol_duvar (zb, z, has_kapi, has_pen and not has_kapi)
-        else:                 p = sag_duvar (zb, z, has_kapi, has_pen and not has_kapi)
-        for k, brep in p.items():
-            el["{}_{}".format(prefix, k)] = brep
-    return el
+def bool_fark(brep, kesiciler, tol=0.001):
+    """Duvardan açıklıkları çıkarır. Başarısız olursa solid duvarı döndürür."""
+    if not kesiciler:
+        return [brep]
+    try:
+        sonuc = rg.Brep.CreateBooleanDifference([brep], list(kesiciler), tol)
+        if sonuc and len(sonuc) > 0:
+            return list(sonuc)
+    except:
+        pass
+    return [brep]
 
 # =============================================================================
 # MODELİ KUR
 # =============================================================================
 
 tum = {}
+wall_h = kat * z   # duvarların toplam yüksekliği
+
+# Döşeme + tavan (her kat)
 for k in range(kat):
-    tum.update(kat_uret(k))
+    zb = k * z
+    tum["zemin_{}".format(k)] = kutu(0, 0, zb,        x, y, zb + t)
+    tum["tavan_{}".format(k)] = kutu(0, 0, zb + z - t, x, y, zb + z)
 
-z_top = kat * z
+# Solid duvar panelleri (4 cephe)
+duvarlar = {
+    "on":   kutu(0,     0,     0, x,   t,   wall_h),
+    "arka": kutu(0,     y - t, 0, x,   y,   wall_h),
+    "sol":  kutu(0,     0,     0, t,   y,   wall_h),
+    "sag":  kutu(x - t, 0,     0, x,   y,   wall_h),
+}
 
-# Çatı (cati_yukseklik > 0 ise beşik, değilse düz kapak)
+# Açıklıkları cepheye göre grupla → kesici kutular + dolgu panelleri
+kesiciler = {"on": [], "arka": [], "sol": [], "sag": []}
+paneller = []
+
+for ac in acikliklar:
+    cephe = ac.get("cephe", "on")
+    if cephe not in kesiciler:
+        continue
+    u = float(ac.get("u", 0.5))
+    v = float(ac.get("v_alt", 0.9))
+    g = float(ac.get("genislik", 1.0))
+    h = float(ac.get("yukseklik", 1.0))
+
+    # Global ölçek (pencere/kapı)
+    olcek = pen_olcek if ac.get("tip") == "pencere" else kapi_olcek
+    gc = max(0.3, g * olcek)
+    hc = max(0.3, h * olcek)
+    u = u - (gc - g) / 2.0   # ölçeği merkezden uygula
+
+    # Cephe uzunluğuna göre konumu sınırla
+    cephe_uz = x if cephe in ("on", "arka") else y
+    if cephe_uz - gc - 0.1 > 0.1:
+        u = max(0.1, min(u, cephe_uz - gc - 0.1))
+    else:
+        u = 0.1
+    if v + hc > wall_h:
+        hc = max(0.3, wall_h - v - 0.05)
+
+    # Cepheye göre kesici (duvarı tam deler) + ince dolgu paneli
+    if cephe == "on":
+        kesiciler["on"].append(kutu(u, -0.1, v, u + gc, t + 0.1, v + hc))
+        paneller.append(kutu(u, t * 0.4, v, u + gc, t * 0.6, v + hc))
+    elif cephe == "arka":
+        kesiciler["arka"].append(kutu(u, y - t - 0.1, v, u + gc, y + 0.1, v + hc))
+        paneller.append(kutu(u, y - t * 0.6, v, u + gc, y - t * 0.4, v + hc))
+    elif cephe == "sol":
+        kesiciler["sol"].append(kutu(-0.1, u, v, t + 0.1, u + gc, v + hc))
+        paneller.append(kutu(t * 0.4, u, v, t * 0.6, u + gc, v + hc))
+    else:  # sag
+        kesiciler["sag"].append(kutu(x - t - 0.1, u, v, x + 0.1, u + gc, v + hc))
+        paneller.append(kutu(x - t * 0.6, u, v, x - t * 0.4, u + gc, v + hc))
+
+# Duvarları açıklıklarla del
+duvar_breps = []
+for cephe, brep in duvarlar.items():
+    duvar_breps += bool_fark(brep, kesiciler[cephe])
+
+# Çatı
+cati_breps = []
 if cati_yukseklik > 0.05:
-    p0 = rg.Point3d(0,   0, z_top);  p1 = rg.Point3d(x,   0, z_top)
-    p2 = rg.Point3d(x,   y, z_top);  p3 = rg.Point3d(0,   y, z_top)
-    p4 = rg.Point3d(x/2, 0, z_top + cati_yukseklik)
-    p5 = rg.Point3d(x/2, y, z_top + cati_yukseklik)
-    for isim, pts in [
-        ("cati_sol",  (p0, p4, p5, p3)),
-        ("cati_sag",  (p4, p1, p2, p5)),
-        ("cati_on",   (p0, p1, p4, p4)),
-        ("cati_arka", (p3, p5, p2, p2)),
-    ]:
+    p0 = rg.Point3d(0,   0, wall_h);  p1 = rg.Point3d(x,   0, wall_h)
+    p2 = rg.Point3d(x,   y, wall_h);  p3 = rg.Point3d(0,   y, wall_h)
+    p4 = rg.Point3d(x/2, 0, wall_h + cati_yukseklik)
+    p5 = rg.Point3d(x/2, y, wall_h + cati_yukseklik)
+    for pts in [(p0, p4, p5, p3), (p4, p1, p2, p5), (p0, p1, p4, p4), (p3, p5, p2, p2)]:
         b = rg.Brep.CreateFromCornerPoints(pts[0], pts[1], pts[2], pts[3], 0.01)
         if b:
-            tum[isim] = b
+            cati_breps.append(b)
 else:
-    tum["cati_duz"] = kutu(0, 0, z_top, x, y, z_top + t)
+    cati_breps.append(kutu(0, 0, wall_h, x, y, wall_h + t))
 
-# Saçaklar
+# Saçak (opsiyonel)
 if sacak_g > 0.01:
-    if "on"   in sacak_cepheler: tum["sacak_on"]   = kutu(-sacak_g, -sacak_g, z_top-t, x+sacak_g, 0,         z_top)
-    if "arka" in sacak_cepheler: tum["sacak_arka"] = kutu(-sacak_g, y,        z_top-t, x+sacak_g, y+sacak_g, z_top)
-    if "sol"  in sacak_cepheler: tum["sacak_sol"]  = kutu(-sacak_g, -sacak_g, z_top-t, 0,         y+sacak_g, z_top)
-    if "sag"  in sacak_cepheler: tum["sacak_sag"]  = kutu(x,        -sacak_g, z_top-t, x+sacak_g, y+sacak_g, z_top)
+    cati_breps.append(kutu(-sacak_g, -sacak_g, wall_h - t, x + sacak_g, y + sacak_g, wall_h))
 
 # =============================================================================
 # GRASSHOPPER ÇIKTI
 # =============================================================================
 
-a = [b for b in tum.values() if b is not None]
+a = (list(tum.values()) + duvar_breps + paneller + cati_breps)
+a = [b for b in a if b is not None]
+
+n_pen = sum(1 for ac in acikliklar if ac.get("tip") == "pencere")
+n_kapi = sum(1 for ac in acikliklar if ac.get("tip") == "kapi")
 
 bilgi = "\n".join([
     "=== YENIDEN KURULAN PARAMETRIK MODEL ===",
+    "Kaynak: {}".format("segment_v2 JSON" if veri else "varsayilan/slider"),
     "Bina: {:.2f} x {:.2f} m, kat yuk {:.2f} m x {} kat".format(x, y, z, kat),
-    "Kapi: {:.2f} x {:.2f} m  cephe={}".format(u, v_kapi, kapi_cephe),
-    "Pencere: {:.2f} x {:.2f} m  denizlik {:.2f} m  cepheler={}".format(
-        pen_g, pen_y, pen_deniz, ",".join(pen_cepheler) if pen_cepheler else "yok"),
     "Cati yuksekligi: {:.2f} m {}".format(cati_yukseklik, "(duz)" if cati_yukseklik <= 0.05 else "(besik)"),
-    "Sacak: {:.2f} m  cepheler={}".format(sacak_g, ",".join(sacak_cepheler) if sacak_cepheler else "yok"),
+    "Pencere: {}  Kapi: {}  (gercek konumlarda)".format(n_pen, n_kapi),
+    "Pencere olcek: x{:.2f}   Kapi olcek: x{:.2f}".format(pen_olcek, kapi_olcek),
     "Toplam eleman: {}".format(len(a)),
     "",
-    ">> Her parametreye bir Number Slider bagla, modeli editle.",
+    ">> bina_genislik / kat_sayisi / pencere_olcek ... slider'lari ile editle.",
 ])

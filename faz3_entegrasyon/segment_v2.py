@@ -505,35 +505,65 @@ def mesh_renklendir(mesh, yuzey_siniflar):
 # Giriş:  mesh_giris (Mesh), calistir (bool)
 # Çıkış:  a (renkli mesh), rapor (metin), parametreler (JSON metin)
 
+def _geo_to_mesh(g):
+    """Mesh/Brep/Extrusion/SubD geometrisini birlesik Mesh'e cevirir."""
+    if g is None:
+        return None
+    if isinstance(g, rg.Mesh):
+        return g
+    # Brep'e cevirebileceklerimiz (Extrusion, SubD vb.)
+    brep = None
+    if isinstance(g, rg.Brep):
+        brep = g
+    else:
+        for cevir in ("ToBrep", "ToBrep"):
+            try:
+                brep = g.ToBrep()
+                break
+            except:
+                brep = None
+    if brep is not None:
+        birlesik = rg.Mesh()
+        parcalar = rg.Mesh.CreateFromBrep(brep, rg.MeshingParameters.Default)
+        if parcalar:
+            for ms in parcalar:
+                birlesik.Append(ms)
+        if birlesik.Faces.Count > 0:
+            return birlesik
+    return None
+
+
 def mesh_coerce(m):
     """
-    Giriş gerçek bir Mesh degilse (ornegin Rhino'dan GUID referansi geldiyse)
-    onu gercek Rhino.Geometry.Mesh'e cevirir.
+    Giriş gerçek bir Mesh degilse (Rhino'dan GUID referansi ya da Brep
+    geldiyse) onu gercek Rhino.Geometry.Mesh'e cevirir.
     Type hint ayarlanmasa bile calismayi garantiler.
     """
     if m is None:
         return None
     if isinstance(m, rg.Mesh):
         return m
-    # GUID → Rhino dokumanindan geometriyi getir
+    # Dogrudan geometri (Brep/Extrusion) geldiyse
+    g = _geo_to_mesh(m)
+    if g is not None:
+        return g
+    # GUID geldiyse Rhino dokumanindan geometriyi getir
     try:
         import System
         if isinstance(m, System.Guid):
-            obj = Rhino.RhinoDoc.ActiveDoc.Objects.FindId(m)
-            if obj is not None:
-                g = obj.Geometry
-                if isinstance(g, rg.Mesh):
-                    return g
-                # Brep/Extrusion ise mesh'e cevir
+            doc = Rhino.RhinoDoc.ActiveDoc
+            obj = None
+            try:
+                obj = doc.Objects.FindId(m)
+            except:
                 try:
-                    birlesik = rg.Mesh()
-                    for ms in rg.Mesh.CreateFromBrep(rg.Brep.TryConvertBrep(g),
-                                                     rg.MeshingParameters.Default):
-                        birlesik.Append(ms)
-                    if birlesik.Faces.Count > 0:
-                        return birlesik
+                    obj = doc.Objects.Find(m)
                 except:
-                    pass
+                    obj = None
+            if obj is not None:
+                g2 = _geo_to_mesh(obj.Geometry)
+                if g2 is not None:
+                    return g2
     except:
         pass
     return m

@@ -663,6 +663,7 @@ a              = None
 rapor          = "Mesh baglayin ve 'calistir' toggle'ini True yapin."
 parametreler   = ""
 parametre_json = ""    # parametrik_kur.py'ye giden makine-okur veri
+siniflar       = None  # pencere_editle.py (Program 2) icin yuzey etiketleri
 
 if "calistir" in dir() and calistir and "mesh_giris" in dir() and mesh_giris is not None:
     mesh_giris = mesh_coerce(mesh_giris)

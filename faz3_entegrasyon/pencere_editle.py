@@ -36,6 +36,7 @@
 
 import Rhino.Geometry as rg
 import Rhino
+import math
 
 PENCERE = 4   # pencere sinif no (0=duvar 1=zemin 2=tavan 3=kapi 4=pencere 5=cati 6=sacak)
 
@@ -98,12 +99,42 @@ if ("mesh_in" in dir() and mesh_in is not None
     pen_yuz = [i for i in range(F.Count)
                if i < len(siniflar) and siniflar[i] == PENCERE]
 
-    # 2) Ortak vertex paylasan pencere yuzlerini kumele = ayri ayri pencereler
-    vtx_face = {}
-    for i in pen_yuz:
-        for vi in yuz_vtx(i):
-            vtx_face.setdefault(vi, []).append(i)
+    # Her pencere yuzunun merkezi
+    def yuz_merkez(i):
+        vs = yuz_vtx(i)
+        n = len(vs)
+        return (sum(V[vi].X for vi in vs) / n,
+                sum(V[vi].Y for vi in vs) / n,
+                sum(V[vi].Z for vi in vs) / n)
 
+    merkez = {}
+    for i in pen_yuz:
+        merkez[i] = yuz_merkez(i)
+
+    # Esik: pencere yuzlerinin ortalama kenar uzunlugu x 2.5
+    # (Meshy mesh'i unwelded oldugu icin vertex numarasi yerine
+    #  KONUM yakinligina gore kumeliyoruz.)
+    toplam_kenar = 0.0
+    kenar_say = 0
+    for i in pen_yuz:
+        vs = yuz_vtx(i)
+        m = len(vs)
+        for k in range(m):
+            p1 = V[vs[k]]
+            p2 = V[vs[(k + 1) % m]]
+            toplam_kenar += math.sqrt((p1.X - p2.X) ** 2 +
+                                      (p1.Y - p2.Y) ** 2 +
+                                      (p1.Z - p2.Z) ** 2)
+            kenar_say += 1
+    ort_kenar = (toplam_kenar / kenar_say) if kenar_say > 0 else 1.0
+    esik = ort_kenar * 2.5
+
+    def uzaklik(a1, b1):
+        return math.sqrt((a1[0] - b1[0]) ** 2 +
+                         (a1[1] - b1[1]) ** 2 +
+                         (a1[2] - b1[2]) ** 2)
+
+    # 2) KONUM yakinligina gore kumele = birbirine degen ucgenler = tek pencere
     ziyaret = set()
     kumeler = []
     for bas in pen_yuz:
@@ -115,12 +146,17 @@ if ("mesh_in" in dir() and mesh_in is not None
         while yigin:
             f = yigin.pop()
             kume.append(f)
-            for vi in yuz_vtx(f):
-                for k in vtx_face.get(vi, []):
-                    if k not in ziyaret:
-                        ziyaret.add(k)
-                        yigin.append(k)
+            cf = merkez[f]
+            for k in pen_yuz:
+                if k in ziyaret:
+                    continue
+                if uzaklik(cf, merkez[k]) < esik:
+                    ziyaret.add(k)
+                    yigin.append(k)
         kumeler.append(kume)
+
+    # Gurultu filtresi: tek/cok kucuk kumeler (1-2 ucgen) gercek pencere degil
+    kumeler = [k for k in kumeler if len(k) >= 3]
 
     # 3) Her pencereyi kendi merkezinden olcekle
     for kume in kumeler:
@@ -160,7 +196,8 @@ if ("mesh_in" in dir() and mesh_in is not None
     bilgi = "\n".join([
         "=== PENCERE EDIT (orijinal mesh korundu) ===",
         "Pencere yuzu: {}".format(len(pen_yuz)),
-        "Bulunan pencere sayisi: {}".format(len(kumeler)),
+        "Bulunan pencere sayisi: {}  (konum yakinligina gore)".format(len(kumeler)),
+        "Kumeleme esigi: {:.3f} m".format(esik),
         "Genislik carpani: x{:.2f}".format(fw),
         "Yukseklik carpani: x{:.2f}".format(fh),
         "",

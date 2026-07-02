@@ -35,12 +35,45 @@
 # =============================================================================
 
 import Rhino.Geometry as rg
+import Rhino
 
 PENCERE = 4   # pencere sinif no (0=duvar 1=zemin 2=tavan 3=kapi 4=pencere 5=cati 6=sacak)
 
 
 def _v(d, x):
     return x if d is None else d
+
+
+def mesh_coerce(m):
+    """Giris gercek Mesh degilse (GUID / Brep) onu gercek Mesh'e cevirir."""
+    if m is None:
+        return None
+    if isinstance(m, rg.Mesh):
+        return m
+    # Brep/Extrusion -> Mesh
+    try:
+        brep = m if isinstance(m, rg.Brep) else m.ToBrep()
+        if brep is not None:
+            birlesik = rg.Mesh()
+            parcalar = rg.Mesh.CreateFromBrep(brep, rg.MeshingParameters.Default)
+            if parcalar:
+                for ms in parcalar:
+                    birlesik.Append(ms)
+            if birlesik.Faces.Count > 0:
+                return birlesik
+    except:
+        pass
+    # GUID -> Rhino dokumanindan getir
+    try:
+        import System
+        if isinstance(m, System.Guid):
+            doc = Rhino.RhinoDoc.ActiveDoc
+            obj = doc.Objects.FindId(m)
+            if obj is not None and isinstance(obj.Geometry, rg.Mesh):
+                return obj.Geometry
+    except:
+        pass
+    return m
 
 
 fw = float(_v(globals().get("pen_genislik"),  1.0))   # 1.0 = ayni
@@ -52,6 +85,7 @@ bilgi = "mesh_in + siniflar baglayin (Program1'in a ve siniflar cikislari)."
 if ("mesh_in" in dir() and mesh_in is not None
         and "siniflar" in dir() and siniflar):
 
+    mesh_in = mesh_coerce(mesh_in)
     mesh = mesh_in.DuplicateMesh()
     F = mesh.Faces
     V = mesh.Vertices

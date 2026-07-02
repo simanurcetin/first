@@ -21,6 +21,7 @@
 # =============================================================================
 
 import Rhino.Geometry as rg
+import Rhino
 import os
 
 
@@ -28,10 +29,42 @@ def _v(d, x):
     return x if d is None else d
 
 
+def mesh_coerce(m):
+    """Giris gercek Mesh degilse (GUID / Brep) onu gercek Mesh'e cevirir."""
+    if m is None:
+        return None
+    if isinstance(m, rg.Mesh):
+        return m
+    try:
+        brep = m if isinstance(m, rg.Brep) else m.ToBrep()
+        if brep is not None:
+            birlesik = rg.Mesh()
+            parcalar = rg.Mesh.CreateFromBrep(brep, rg.MeshingParameters.Default)
+            if parcalar:
+                for ms in parcalar:
+                    birlesik.Append(ms)
+            if birlesik.Faces.Count > 0:
+                return birlesik
+    except:
+        pass
+    try:
+        import System
+        if isinstance(m, System.Guid):
+            doc = Rhino.RhinoDoc.ActiveDoc
+            obj = doc.Objects.FindId(m)
+            if obj is not None and isinstance(obj.Geometry, rg.Mesh):
+                return obj.Geometry
+    except:
+        pass
+    return m
+
+
 yaz = bool(_v(globals().get("yaz"), False))
 yol = _v(globals().get("dosya_yolu"),
          u"C:\\Users\\siman\\OneDrive\\Masaüstü\\lorddoga\\deneme\\guncellenmis.obj")
 
+if "mesh_in" in dir() and mesh_in is not None:
+    mesh_in = mesh_coerce(mesh_in)
 a = mesh_in if ("mesh_in" in dir() and mesh_in is not None) else None
 durum = "yaz toggle'ini True yapin."
 

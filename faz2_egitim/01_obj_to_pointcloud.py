@@ -29,16 +29,29 @@
 
 import numpy as np
 import os
+import sys
 import json
 from tqdm import tqdm   # İlerleme çubuğu
 
 # =============================================================================
 # AYARLAR
 # =============================================================================
+#
+# Klasörler komut satırından da verilebilir:
+#   python 01_obj_to_pointcloud.py <OBJ_KLASORU> <CIKTI_KLASORU>
+# Örnek (train ve test'i ayri ayri cevirmek icin):
+#   python 01_obj_to_pointcloud.py data_v2_test/train_702 data/processed/pointclouds
+#   python 01_obj_to_pointcloud.py data_v2_test/test_100  data/processed/pointclouds_test
 
-OBJ_KLASORU  = "data/obj_files"    # Faz 1 çıktısı
+OBJ_KLASORU  = "data/obj_files"    # Faz 1 çıktısı (varsayilan)
 JSON_KLASORU = "data/json_files"   # Faz 1 çıktısı
 CIKTI_KLASORU = "data/processed/pointclouds"
+
+# Komut satiri argumanlari varsa onlari kullan
+if len(sys.argv) >= 2:
+    OBJ_KLASORU = sys.argv[1]
+if len(sys.argv) >= 3:
+    CIKTI_KLASORU = sys.argv[2]
 
 NOKTA_SAYISI = 2048   # Her modelden kaç nokta örneklenecek
                        # Daha fazla = daha iyi ama daha yavaş eğitim

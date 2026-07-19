@@ -29,7 +29,14 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 import os
+import sys
 import time
+
+# Proje kokunu (first/) sys.path'e ekle ki "faz2_egitim" paketi bulunsun.
+# (python faz2_egitim/06_finetune.py seklinde calistirilinca gerekir.)
+_PROJE_KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJE_KOK not in sys.path:
+    sys.path.insert(0, _PROJE_KOK)
 
 from faz2_egitim.o2_dataset import loader_olustur
 from faz2_egitim.o3_pointnet2_model import PointNet2Segmentasyon

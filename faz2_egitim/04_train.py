@@ -29,7 +29,14 @@ import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 import os
+import sys
 import time
+
+# Proje kokunu (first/) sys.path'e ekle ki "faz2_egitim" paketi bulunsun.
+# (python faz2_egitim/04_train.py seklinde calistirilinca gerekir.)
+_PROJE_KOK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJE_KOK not in sys.path:
+    sys.path.insert(0, _PROJE_KOK)
 
 # Kendi dosyalarımızı import et
 from faz2_egitim.o2_dataset import loader_olustur
@@ -67,7 +74,7 @@ AYARLAR = {
     "nokta_klasoru":  "data/processed/pointclouds",
     "model_kayit":    "data/processed",
     "n_sinif":        7,
-    "epoch":          200,
+    "epoch":          100,
     "batch_size":     16,
     "ogrenme_hizi":   0.001,
     "test_orani":     0.15,

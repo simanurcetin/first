@@ -90,6 +90,11 @@ def duvar_kutulari(cephe, tip, zb, zh, x, y, wp):
     """
     Bir cephenin duvar parcalarini (suffix, (x0,y0,z0,x1,y1,z1)) listesi olarak
     dondurur. tip: 'duvar' | 'kapi' | 'pen'. wp: acinim parametreleri dict.
+
+    DOLU PANEL (v3-B): Acikliklar delik olarak birakilmaz; deligi kapatan bir
+    panel eklenir. Etiket o panele verilir (pen_cam -> window, kapi_panel ->
+    door). Cevredeki cerceve seritleri DUVAR'dir (cerc_* -> etiket 0). Boylece
+    cephe dolu bir yuzeydir -> gercek (Meshy) mesh'lere daha yakin.
     """
     kutular = []
     if cephe == "on":       yb0, yb1 = 0.0, T
@@ -109,15 +114,21 @@ def duvar_kutulari(cephe, tip, zb, zh, x, y, wp):
 
     if tip == "kapi":
         ko = wp["offset"]; u = wp["u"]; vk = wp["v_kapi"]
-        kutular.append(("kapi_sol", yatay_kutu(0.0,   ko,    zb,      zb + zh)))
-        kutular.append(("kapi_sag", yatay_kutu(ko + u, L,    zb,      zb + zh)))
-        kutular.append(("kapi_ust", yatay_kutu(ko,    ko + u, zb + vk, zb + zh)))
+        # cevre cerceve (DUVAR)
+        kutular.append(("cerc_sol", yatay_kutu(0.0,    ko,     zb,      zb + zh)))
+        kutular.append(("cerc_sag", yatay_kutu(ko + u, L,      zb,      zb + zh)))
+        kutular.append(("cerc_ust", yatay_kutu(ko,     ko + u, zb + vk, zb + zh)))
+        # deligi kapatan panel (KAPI)
+        kutular.append(("kapi_panel", yatay_kutu(ko, ko + u, zb, zb + vk)))
     elif tip == "pen":
         po = wp["po"]; g = wp["g"]; yy = wp["y"]; dz = wp["deniz"]
-        kutular.append(("pen_sol", yatay_kutu(0.0,    po,     zb,          zb + zh)))
-        kutular.append(("pen_sag", yatay_kutu(po + g, L,      zb,          zb + zh)))
-        kutular.append(("pen_alt", yatay_kutu(po,     po + g, zb,          zb + dz)))
-        kutular.append(("pen_ust", yatay_kutu(po,     po + g, zb + dz + yy, zb + zh)))
+        # cevre cerceve (DUVAR)
+        kutular.append(("cerc_sol", yatay_kutu(0.0,    po,     zb,           zb + zh)))
+        kutular.append(("cerc_sag", yatay_kutu(po + g, L,      zb,           zb + zh)))
+        kutular.append(("cerc_alt", yatay_kutu(po,     po + g, zb,           zb + dz)))
+        kutular.append(("cerc_ust", yatay_kutu(po,     po + g, zb + dz + yy, zb + zh)))
+        # deligi kapatan panel (PENCERE)
+        kutular.append(("pen_cam", yatay_kutu(po, po + g, zb + dz, zb + dz + yy)))
     else:  # duz duvar
         kutular.append(("duvar", yatay_kutu(0.0, L, zb, zb + zh)))
     return kutular
